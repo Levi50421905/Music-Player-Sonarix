@@ -99,7 +99,7 @@ export function useKeyboardShortcuts(handlers: Handlers) {
           break;
 
         // ── UI ────────────────────────────────────────────────────────────
-        case "KeyM":
+        case "Key0":
           if (ctrl) { e.preventDefault(); handlers.onToggleMini(); }
           break;
 

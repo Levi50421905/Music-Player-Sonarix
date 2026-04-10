@@ -1,35 +1,26 @@
 /**
  * WaveformSeekbar.tsx — SoundCloud-style Waveform Seekbar
  *
- * WHY waveform seekbar:
- *   Progress bar biasa hanya menunjukkan posisi waktu.
- *   Waveform menunjukkan "isi" audio — mana bagian yang keras,
- *   mana yang sunyi — sehingga user bisa navigate ke bagian
- *   yang mereka inginkan dengan lebih intuitif.
- *
- * CARA KERJA:
- *   1. Saat lagu di-load, decode audio buffer
- *   2. Downsample channel data ke N bars
- *   3. Gambar waveform di canvas: played (terang) vs unplayed (redup)
- *   4. Click/drag untuk seek
- *
- * CATATAN PERFORMA:
- *   Decode audio buffer hanya sekali per lagu dan di-cache.
- *   Canvas hanya di-redraw saat progress berubah (bukan tiap frame).
+ * Fix:
+ *   - Decode audio via fetch(convertFileSrc) bukan readFile()
+ *     karena OfflineAudioContext tidak bisa decode raw bytes FLAC
+ *     yang dibaca lewat plugin-fs di Tauri/Chromium.
+ *   - Canvas draw pakai ctx.save()/restore() agar scale tidak accumulate.
+ *   - ResizeObserver tetap ada agar canvas resize dengan benar.
  */
 
 import { useEffect, useRef, useCallback, useState } from "react";
-import { readFile } from "@tauri-apps/plugin-fs";
+import { audioEngine } from "../../lib/audioEngine";
 
 interface Props {
   filePath: string | null;
-  progress: number;           // 0–100
+  progress: number;        // 0–100
   onSeek: (pct: number) => void;
   height?: number;
   barCount?: number;
 }
 
-// Cache decoded waveforms agar tidak decode ulang
+// Cache decoded waveforms agar tidak decode ulang per lagu
 const waveformCache = new Map<string, Float32Array>();
 
 export default function WaveformSeekbar({
@@ -39,12 +30,12 @@ export default function WaveformSeekbar({
   height = 48,
   barCount = 150,
 }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef   = useRef<HTMLCanvasElement>(null);
   const [waveform, setWaveform] = useState<Float32Array | null>(null);
-  const [loading, setLoading] = useState(false);
-  const isDragging = useRef(false);
+  const [loading, setLoading]   = useState(false);
+  const isDragging  = useRef(false);
 
-  // ── Decode waveform dari file audio ─────────────────────────────────────
+  // ── Decode waveform ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!filePath) return;
 
@@ -55,23 +46,28 @@ export default function WaveformSeekbar({
     }
 
     setLoading(true);
+    let cancelled = false;
 
     (async () => {
       try {
-        // Baca file
-        const bytes = await readFile(filePath);
-        const buffer = bytes.buffer as ArrayBuffer;
+        // ✅ Gunakan asset URL (convertFileSrc via audioEngine helper)
+        //    fetch() bisa decode stream — tidak perlu baca seluruh file ke memory
+        const url      = audioEngine.getAssetUrl(filePath);
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const buffer   = await response.arrayBuffer();
 
-        // Decode via Web Audio API (offline context)
-        const ctx = new OfflineAudioContext(1, 1, 44100);
-        const audioBuffer = await ctx.decodeAudioData(buffer.slice(0));
+        // Decode via OfflineAudioContext
+        // length harus > 0; kita pakai 1 sample karena hanya butuh channel data
+        const offlineCtx  = new OfflineAudioContext(1, 44100, 44100);
+        const audioBuffer = await offlineCtx.decodeAudioData(buffer);
 
-        // Ambil channel data (mono mix)
+        if (cancelled) return;
+
+        // Downsample ke barCount (RMS per segment)
         const channelData = audioBuffer.getChannelData(0);
-
-        // Downsample ke barCount values (RMS per segment)
-        const segSize = Math.floor(channelData.length / barCount);
-        const bars = new Float32Array(barCount);
+        const segSize     = Math.floor(channelData.length / barCount);
+        const bars        = new Float32Array(barCount);
 
         for (let i = 0; i < barCount; i++) {
           let sum = 0;
@@ -86,51 +82,59 @@ export default function WaveformSeekbar({
         if (max > 0) for (let i = 0; i < bars.length; i++) bars[i] /= max;
 
         waveformCache.set(filePath, bars);
-        setWaveform(bars);
+        if (!cancelled) setWaveform(bars);
       } catch (err) {
         console.warn("Waveform decode failed:", err);
-        // Fallback: generate fake waveform
+        if (cancelled) return;
+
+        // Fallback: fake waveform agar UI tetap fungsional
         const fake = new Float32Array(barCount);
         for (let i = 0; i < barCount; i++) {
           fake[i] = 0.2 + Math.abs(Math.sin(i * 0.3) * 0.4 + Math.sin(i * 0.7) * 0.3);
         }
         setWaveform(fake);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+
+    return () => { cancelled = true; };
   }, [filePath, barCount]);
 
-  // ── Draw waveform ke canvas ──────────────────────────────────────────────
+  // ── Draw ke canvas ───────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !waveform) return;
 
-    const ctx = canvas.getContext("2d")!;
-    const W = canvas.width / window.devicePixelRatio;
-    const H = canvas.height / window.devicePixelRatio;
-    const dpr = window.devicePixelRatio;
+    const dpr = window.devicePixelRatio || 1;
+    const W   = canvas.offsetWidth;
+    const H   = height;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // ✅ Selalu sync ukuran canvas dengan CSS size
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+
+    const ctx = canvas.getContext("2d")!;
+    ctx.save();           // ✅ save agar scale tidak accumulate
     ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
 
     const playedX = (progress / 100) * W;
-    const barW = (W - barCount * 1) / barCount; // 1px gap
+    const barW    = (W - barCount) / barCount; // 1px gap antar bar
     const minBarH = 2;
 
     for (let i = 0; i < waveform.length; i++) {
-      const x = i * (barW + 1);
-      const barH = Math.max(minBarH, waveform[i] * (H - 4));
-      const y = (H - barH) / 2;
+      const x      = i * (barW + 1);
+      const barH   = Math.max(minBarH, waveform[i] * (H - 4));
+      const y      = (H - barH) / 2;
       const isPlayed = x < playedX;
-      const isNear = Math.abs(x - playedX) < barW * 2; // near playhead
+      const isNear   = Math.abs(x - playedX) < barW * 2;
 
-      // Color: played = gradient purple-pink, unplayed = muted
       if (isPlayed) {
-        const gradH = ctx.createLinearGradient(0, y, 0, y + barH);
-        gradH.addColorStop(0, "#a78bfa");
-        gradH.addColorStop(1, "#EC4899");
-        ctx.fillStyle = gradH;
+        const grad = ctx.createLinearGradient(0, y, 0, y + barH);
+        grad.addColorStop(0, "#a78bfa");
+        grad.addColorStop(1, "#EC4899");
+        ctx.fillStyle = grad;
       } else if (isNear) {
         ctx.fillStyle = "rgba(167,139,250,0.5)";
       } else {
@@ -148,28 +152,31 @@ export default function WaveformSeekbar({
     ctx.roundRect(playedX - 1, 0, 2, H, 1);
     ctx.fill();
 
-    // Reset scale
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-  }, [waveform, progress, barCount]);
+    ctx.restore(); // ✅ restore — bersih untuk render berikutnya
+  }, [waveform, progress, barCount, height]);
 
-  // ── Resize canvas ────────────────────────────────────────────────────────
+  // ── Resize observer ──────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const dpr = window.devicePixelRatio;
+    // Trigger redraw saat container resize
     const ro = new ResizeObserver(() => {
-      canvas.width = canvas.offsetWidth * dpr;
+      // Paksa re-render dengan setState dummy tidak perlu —
+      // draw effect sudah baca offsetWidth langsung dari canvas.
+      // Tapi kita perlu trigger effect, jadi kita redraw manual:
+      if (!waveform) return;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width  = canvas.offsetWidth * dpr;
       canvas.height = height * dpr;
-      canvas.style.height = `${height}px`;
     });
     ro.observe(canvas);
     return () => ro.disconnect();
-  }, [height]);
+  }, [height, waveform]);
 
   // ── Seek interaction ─────────────────────────────────────────────────────
-  const getPercent = (e: React.MouseEvent | MouseEvent) => {
+  const getPercent = (e: React.MouseEvent | MouseEvent): number => {
     const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
+    const rect   = canvas.getBoundingClientRect();
     return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * 100;
   };
 
@@ -177,8 +184,14 @@ export default function WaveformSeekbar({
     isDragging.current = true;
     onSeek(getPercent(e));
 
-    const onMove = (ev: MouseEvent) => { if (isDragging.current) onSeek(getPercent(ev as any)); };
-    const onUp   = () => { isDragging.current = false; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    const onMove = (ev: MouseEvent) => {
+      if (isDragging.current) onSeek(getPercent(ev as any));
+    };
+    const onUp = () => {
+      isDragging.current = false;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   }, [onSeek]);
@@ -189,7 +202,9 @@ export default function WaveformSeekbar({
         ref={canvasRef}
         onMouseDown={handleMouseDown}
         style={{
-          width: "100%", height, display: "block",
+          width: "100%",
+          height,
+          display: "block",
           cursor: "pointer",
           opacity: loading ? 0.4 : 1,
           transition: "opacity 0.3s",

@@ -1,6 +1,6 @@
 // src/tests/setup.ts
 // Dijalankan sebelum semua test
-
+import { vi, beforeAll, afterAll } from "vitest";
 // Mock Tauri APIs yang tidak tersedia di test environment
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),

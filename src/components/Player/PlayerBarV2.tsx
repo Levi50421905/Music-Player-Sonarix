@@ -151,10 +151,10 @@ export default function PlayerBarV2({ onPlayPause, onNext, onPrev, onRating }: P
           </div>
 
           {/* Time */}
-          <div style={{ fontSize: 10, color: "#6b7280", fontFamily: "Space Mono, monospace", display: "flex", gap: 6, alignItems: "center" }}>
-            <span>{fmt(currentTime)}</span>
-            <span style={{ color: "#2a2a3e" }}>/</span>
-            <span>{fmt(duration)}</span>
+<div style={{ fontSize: 10, color: "#6b7280", fontFamily: "Space Mono, monospace", display: "flex", gap: 6, alignItems: "center" }}>
+  <span>{fmt(currentTime || audioEngine.currentTime)}</span>
+  <span style={{ color: "#2a2a3e" }}>/</span>
+  <span>{fmt(duration || audioEngine.duration)}</span>
             {/* Waveform toggle */}
             <button
               onClick={() => setUseWaveform(v => !v)}

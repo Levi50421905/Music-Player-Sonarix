@@ -10,14 +10,22 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
-        "title": "resonance",
-        "width": 800,
-        "height": 600
+        "title": "Resonance",
+        "width": 1100,
+        "height": 700,
+        "minWidth": 900,
+        "minHeight": 600,
+        "center": true
       }
     ],
     "security": {
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      },
       "csp": null
     }
   },
@@ -31,5 +39,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "sql": {
+      "preload": ["sqlite:resonance.db"]
+    }
   }
 }

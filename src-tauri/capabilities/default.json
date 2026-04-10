@@ -1,10 +1,47 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Default permissions",
+  "platforms": ["linux", "macOS", "windows"],
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "opener:default"
+    "core:event:default",
+    "core:event:allow-listen",
+    "core:event:allow-emit",
+    "core:event:allow-unlisten",
+    "core:window:default",
+    "core:window:allow-close",
+    "core:window:allow-create",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-always-on-top",
+    "fs:default",
+    "fs:read-all",
+    "fs:read-dirs",
+    "fs:read-files",
+    "fs:read-meta",
+    "fs:scope",
+    "fs:scope-home-recursive",
+    "fs:scope-download-recursive",
+    "fs:scope-document-recursive",
+    "fs:scope-audio-recursive",
+    "fs:scope-desktop-recursive",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "/**" },
+        { "path": "?:\\**" }
+      ]
+    },
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "shell:default",
+    "shell:allow-open",
+    "sql:default",
+    "sql:allow-execute",
+    "sql:allow-select",
+    "sql:allow-load",
+    "sql:allow-close"
   ]
 }

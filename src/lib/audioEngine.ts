@@ -1,23 +1,13 @@
 /**
  * audioEngine.ts — Web Audio API Wrapper
  *
- * WHY: Web Audio API sangat powerful tapi verbose. File ini meng-encapsulate
- * semua logika audio (play, pause, seek, EQ, visualizer data) ke interface
- * yang bersih dan mudah dipakai oleh komponen React.
- *
- * GRAPH (audio node chain):
- *   AudioBufferSource → GainNode (volume) → BiquadFilters[10] (EQ) →
- *   AnalyserNode (visualizer) → AudioContext.destination (speaker)
- *
- * WHY AudioBufferSource bukan HTMLAudioElement:
- *   - Support FLAC 32-bit float, high sample rate (192kHz)
- *   - Akses penuh ke Web Audio node graph
- *   - HTMLAudioElement tidak support semua format di semua browser
- *
- * CATATAN: Untuk file besar (FLAC), kita stream menggunakan
- * HTMLAudioElement + MediaElementSourceNode sebagai fallback yang lebih
- * memory-efficient.
+ * Fix:
+ *   - onTimeUpdate / onLoadedMetadata sekarang disimpan sebagai callback
+ *     dan dipasang ke audioEl di dalam init(), bukan di setter.
+ *     Sebelumnya setter langsung addEventListener tapi audioEl belum ada.
+ *   - seek() dan seekPercent() diberi guard isFinite
  */
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 export type RepeatMode = "off" | "one" | "all";
 
@@ -35,7 +25,11 @@ export class AudioEngine {
   // State
   private _volume = 0.8;
   private _eqGains: number[] = new Array(10).fill(0);
+
+  // Callbacks — disimpan di sini, dipasang ke audioEl di init()
   private _onEnded: (() => void) | null = null;
+  private _onTimeUpdate: ((time: number) => void) | null = null;
+  private _onLoadedMetadata: ((duration: number) => void) | null = null;
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
@@ -53,6 +47,19 @@ export class AudioEngine {
     this.audioEl.crossOrigin = "anonymous";
     this.audioEl.preload = "auto";
 
+    // ✅ Pasang semua event listener di sini, setelah audioEl ada
+    this.audioEl.addEventListener("ended", () => {
+      this._onEnded?.();
+    });
+
+    this.audioEl.addEventListener("timeupdate", () => {
+      if (this.audioEl) this._onTimeUpdate?.(this.audioEl.currentTime);
+    });
+
+    this.audioEl.addEventListener("loadedmetadata", () => {
+      if (this.audioEl) this._onLoadedMetadata?.(this.audioEl.duration);
+    });
+
     // Volume gain
     this.gainNode = this.ctx.createGain();
     this.gainNode.gain.value = this._volume;
@@ -69,10 +76,10 @@ export class AudioEngine {
 
     // Analyser untuk visualizer
     this.analyser = this.ctx.createAnalyser();
-    this.analyser.fftSize = 256; // 128 bins, cukup untuk bar visualizer
+    this.analyser.fftSize = 256;
     this.analyser.smoothingTimeConstant = 0.8;
 
-    // Connect graph: source → gain → eq[0] → eq[1] → ... → analyser → destination
+    // Connect graph: source → gain → eq[0..9] → analyser → destination
     this.source = this.ctx.createMediaElementSource(this.audioEl);
     this.source.connect(this.gainNode);
 
@@ -83,25 +90,22 @@ export class AudioEngine {
     }
     prev.connect(this.analyser);
     this.analyser.connect(this.ctx.destination);
-
-    // Event listener
-    this.audioEl.addEventListener("ended", () => this._onEnded?.());
   }
 
   // ── Playback ──────────────────────────────────────────────────────────────
 
-  /** Load dan play file audio dari path lokal */
   async play(filePath: string): Promise<void> {
     await this.ensureInit();
 
-    if (this.audioEl!.src === this.pathToUrl(filePath) && !this.audioEl!.ended) {
+    const url = this.pathToUrl(filePath);
+
+    if (this.audioEl!.src === url && !this.audioEl!.ended) {
       this.audioEl!.currentTime = 0;
     } else {
-      this.audioEl!.src = this.pathToUrl(filePath);
+      this.audioEl!.src = url;
       this.audioEl!.load();
     }
 
-    // Resume context jika suspended (browser autoplay policy)
     if (this.ctx!.state === "suspended") {
       await this.ctx!.resume();
     }
@@ -126,12 +130,15 @@ export class AudioEngine {
   }
 
   seek(seconds: number): void {
-    if (this.audioEl) {
-      this.audioEl.currentTime = Math.max(0, Math.min(seconds, this.duration));
-    }
+    if (!this.audioEl) return;
+    // ✅ Guard: jangan seek kalau duration belum ready atau nilai tidak valid
+    if (!isFinite(this.audioEl.duration) || this.audioEl.duration === 0) return;
+    if (!isFinite(seconds)) return;
+    this.audioEl.currentTime = Math.max(0, Math.min(seconds, this.audioEl.duration));
   }
 
   seekPercent(percent: number): void {
+    if (!isFinite(percent)) return; // ✅ Guard
     this.seek((percent / 100) * this.duration);
   }
 
@@ -142,7 +149,8 @@ export class AudioEngine {
   }
 
   get duration(): number {
-    return this.audioEl?.duration ?? 0;
+    const d = this.audioEl?.duration ?? 0;
+    return isFinite(d) ? d : 0; // ✅ Selalu return angka finite
   }
 
   get progress(): number {
@@ -157,32 +165,24 @@ export class AudioEngine {
   // ── Volume ────────────────────────────────────────────────────────────────
 
   setVolume(value: number): void {
-    // value: 0–100 dari UI, konversi ke 0–1 untuk Web Audio
     this._volume = value / 100;
-    if (this.gainNode) {
-      // Smooth transition untuk menghindari click/pop suara
-      this.gainNode.gain.setTargetAtTime(this._volume, this.ctx!.currentTime, 0.01);
+    if (this.gainNode && this.ctx) {
+      this.gainNode.gain.setTargetAtTime(this._volume, this.ctx.currentTime, 0.01);
     }
     if (this.audioEl) this.audioEl.volume = this._volume;
   }
 
   // ── Equalizer ────────────────────────────────────────────────────────────
 
-  /**
-   * Set gain untuk satu band EQ.
-   * @param bandIndex 0–9 (sesuai EQ_FREQUENCIES)
-   * @param gainDb gain dalam dB, range -12 sampai +12
-   */
   setEqBand(bandIndex: number, gainDb: number): void {
     this._eqGains[bandIndex] = gainDb;
-    if (this.eqFilters[bandIndex]) {
+    if (this.eqFilters[bandIndex] && this.ctx) {
       this.eqFilters[bandIndex].gain.setTargetAtTime(
-        gainDb, this.ctx!.currentTime, 0.01
+        gainDb, this.ctx.currentTime, 0.01
       );
     }
   }
 
-  /** Set semua band sekaligus (untuk apply preset) */
   setEqPreset(gains: number[]): void {
     gains.forEach((g, i) => this.setEqBand(i, g));
   }
@@ -193,11 +193,6 @@ export class AudioEngine {
 
   // ── Visualizer ────────────────────────────────────────────────────────────
 
-  /**
-   * Ambil data frekuensi untuk visualizer.
-   * Return Uint8Array dengan nilai 0–255 per frekuensi bin.
-   * Dipanggil di setiap animation frame.
-   */
   getFrequencyData(): Uint8Array {
     if (!this.analyser) return new Uint8Array(128);
     const data = new Uint8Array(this.analyser.frequencyBinCount);
@@ -214,20 +209,20 @@ export class AudioEngine {
 
   // ── Events ────────────────────────────────────────────────────────────────
 
+  /**
+   * Semua setter hanya menyimpan callback.
+   * Listener sudah dipasang ke audioEl di dalam init().
+   */
   onEnded(callback: () => void): void {
     this._onEnded = callback;
   }
 
   onTimeUpdate(callback: (time: number) => void): void {
-    this.audioEl?.addEventListener("timeupdate", () => {
-      callback(this.audioEl!.currentTime);
-    });
+    this._onTimeUpdate = callback;
   }
 
   onLoadedMetadata(callback: (duration: number) => void): void {
-    this.audioEl?.addEventListener("loadedmetadata", () => {
-      callback(this.audioEl!.duration);
-    });
+    this._onLoadedMetadata = callback;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -236,26 +231,21 @@ export class AudioEngine {
     if (!this.ctx) await this.init();
   }
 
-  /**
-   * Konversi path file lokal ke URL yang bisa dimuat HTMLAudioElement.
-   * Tauri menggunakan protokol asset:// untuk file lokal.
-   */
   private pathToUrl(filePath: string): string {
-    // Tauri v2: gunakan convertFileSrc dari @tauri-apps/api/core
-    // Import dilakukan secara dynamic untuk menghindari error di preview web
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { convertFileSrc } = require("@tauri-apps/api/core");
-      return convertFileSrc(filePath);
-    } catch {
-      return filePath; // fallback untuk development di browser
-    }
+    return convertFileSrc(filePath);
+  }
+
+  /** Expose convertFileSrc untuk WaveformSeekbar */
+  getAssetUrl(filePath: string): string {
+    return this.pathToUrl(filePath);
   }
 
   destroy(): void {
     this.audioEl?.pause();
     this.ctx?.close();
     this._onEnded = null;
+    this._onTimeUpdate = null;
+    this._onLoadedMetadata = null;
   }
 }
 

@@ -48,7 +48,7 @@ export default function MiniPlayer() {
   // Terima state update dari main window
   useEffect(() => {
     const unlisteners: (() => void)[] = [];
-
+if (!(window as any).__TAURI_INTERNALS__) return;
     (async () => {
       unlisteners.push(await listen<MiniState>("mini:state", (e) => {
         setState(e.payload);

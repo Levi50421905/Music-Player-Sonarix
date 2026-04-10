@@ -1,19 +1,11 @@
 /**
- * db.ts — SQLite Database Layer
- *
- * WHY: Semua data library, rating, play history, dan settings disimpan secara
- * lokal menggunakan SQLite via Tauri's SQL plugin. Ini lebih ringan dari
- * IndexedDB dan lebih powerful dari localStorage untuk data relasional.
- *
- * PATTERN: Semua fungsi async, return typed objects, error selalu di-throw
- * agar bisa di-catch di layer atas (store/component).
+ * db.ts — SQLite Database Layer (updated with delete functions)
  */
 
 import Database from "@tauri-apps/plugin-sql";
 
 let _db: Database | null = null;
 
-// ── Singleton DB connection ──────────────────────────────────────────────────
 export async function getDb(): Promise<Database> {
   if (_db) return _db;
   _db = await Database.load("sqlite:resonance.db");
@@ -21,9 +13,6 @@ export async function getDb(): Promise<Database> {
   return _db;
 }
 
-// ── Schema migration ─────────────────────────────────────────────────────────
-// WHY migration pattern: memastikan schema selalu up-to-date tanpa
-// menghapus data yang sudah ada saat app di-update.
 async function migrate(db: Database) {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS songs (
@@ -37,7 +26,7 @@ async function migrate(db: Database) {
       duration    REAL,
       bitrate     INTEGER,
       format      TEXT,
-      cover_art   TEXT,   -- base64 atau file path thumbnail
+      cover_art   TEXT,
       bpm         REAL,
       date_added  DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -81,7 +70,7 @@ async function migrate(db: Database) {
   `);
 }
 
-// ── Song CRUD ────────────────────────────────────────────────────────────────
+// ── Song types ────────────────────────────────────────────────────────────────
 
 export interface Song {
   id: number;
@@ -97,12 +86,17 @@ export interface Song {
   cover_art: string | null;
   bpm: number | null;
   date_added: string;
-  // joined fields
   stars?: number;
   play_count?: number;
 }
 
-/** Insert atau update (upsert) lagu berdasarkan path */
+export interface PlayRecord {
+  song_id: number;
+  played_at: string;
+}
+
+// ── Song CRUD ─────────────────────────────────────────────────────────────────
+
 export async function upsertSong(db: Database, song: Omit<Song, "id" | "date_added">) {
   await db.execute(
     `INSERT INTO songs (path, title, artist, album, genre, year, duration, bitrate, format, cover_art, bpm)
@@ -117,21 +111,31 @@ export async function upsertSong(db: Database, song: Omit<Song, "id" | "date_add
   );
 }
 
-/** Ambil semua lagu beserta rating & play count (LEFT JOIN) */
 export async function getAllSongs(db: Database): Promise<Song[]> {
   return await db.select<Song[]>(`
     SELECT s.*,
            r.stars,
            COUNT(ph.id) AS play_count
     FROM songs s
-    LEFT JOIN ratings r     ON r.song_id = s.id
+    LEFT JOIN ratings r       ON r.song_id = s.id
     LEFT JOIN play_history ph ON ph.song_id = s.id
     GROUP BY s.id
     ORDER BY s.title
   `);
 }
 
-/** Cari lagu berdasarkan query (title/artist/album) */
+/** Hapus lagu dari library (juga hapus ratings & history via CASCADE) */
+export async function deleteSong(db: Database, songId: number) {
+  await db.execute(`DELETE FROM songs WHERE id = $1`, [songId]);
+}
+
+/** Hapus multiple lagu sekaligus */
+export async function deleteSongs(db: Database, songIds: number[]) {
+  if (songIds.length === 0) return;
+  const placeholders = songIds.map((_, i) => `$${i + 1}`).join(",");
+  await db.execute(`DELETE FROM songs WHERE id IN (${placeholders})`, songIds);
+}
+
 export async function searchSongs(db: Database, query: string): Promise<Song[]> {
   const q = `%${query}%`;
   return await db.select<Song[]>(
@@ -145,27 +149,28 @@ export async function searchSongs(db: Database, query: string): Promise<Song[]> 
   );
 }
 
-// ── Rating ───────────────────────────────────────────────────────────────────
+// ── Rating ────────────────────────────────────────────────────────────────────
 
 export async function setRating(db: Database, songId: number, stars: number) {
-  await db.execute(
-    `INSERT INTO ratings (song_id, stars) VALUES ($1,$2)
-     ON CONFLICT(song_id) DO UPDATE SET stars=excluded.stars`,
-    [songId, stars]
-  );
+  if (stars === 0) {
+    await db.execute(`DELETE FROM ratings WHERE song_id = $1`, [songId]);
+  } else {
+    await db.execute(
+      `INSERT INTO ratings (song_id, stars) VALUES ($1,$2)
+       ON CONFLICT(song_id) DO UPDATE SET stars=excluded.stars`,
+      [songId, stars]
+    );
+  }
 }
 
-// ── Play History ─────────────────────────────────────────────────────────────
+// ── Play History ──────────────────────────────────────────────────────────────
 
 export async function recordPlay(db: Database, songId: number) {
-  await db.execute(
-    `INSERT INTO play_history (song_id) VALUES ($1)`,
-    [songId]
-  );
+  await db.execute(`INSERT INTO play_history (song_id) VALUES ($1)`, [songId]);
 }
 
 export async function getPlayHistory(db: Database, limit = 200) {
-  return await db.select<{ song_id: number; played_at: string }[]>(
+  return await db.select<PlayRecord[]>(
     `SELECT song_id, played_at FROM play_history ORDER BY played_at DESC LIMIT $1`,
     [limit]
   );
@@ -174,10 +179,12 @@ export async function getPlayHistory(db: Database, limit = 200) {
 // ── Playlists ─────────────────────────────────────────────────────────────────
 
 export async function createPlaylist(db: Database, name: string): Promise<number> {
-  const result = await db.execute(
-    `INSERT INTO playlists (name) VALUES ($1)`, [name]
-  );
+  const result = await db.execute(`INSERT INTO playlists (name) VALUES ($1)`, [name]);
   return result.lastInsertId as number;
+}
+
+export async function deletePlaylist(db: Database, playlistId: number) {
+  await db.execute(`DELETE FROM playlists WHERE id = $1`, [playlistId]);
 }
 
 export async function getPlaylists(db: Database) {
@@ -198,6 +205,14 @@ export async function addToPlaylist(db: Database, playlistId: number, songId: nu
   await db.execute(
     `INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id, position) VALUES ($1,$2,$3)`,
     [playlistId, songId, pos]
+  );
+}
+
+/** Hapus lagu dari playlist */
+export async function removeFromPlaylist(db: Database, playlistId: number, songId: number) {
+  await db.execute(
+    `DELETE FROM playlist_songs WHERE playlist_id = $1 AND song_id = $2`,
+    [playlistId, songId]
   );
 }
 

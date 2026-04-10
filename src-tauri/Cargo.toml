@@ -1,12 +1,10 @@
 [package]
 name = "resonance"
 version = "0.1.0"
-description = "Resonance — Local Music Player"
-authors = ["AR"]
 edition = "2021"
 
 [lib]
-name = "app_lib"
+name = "resonance_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
@@ -17,12 +15,10 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri            = { version = "2", features = ["tray-icon", "image-ico", "image-png"] }
-tauri-plugin-fs  = "2"
+tauri               = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-fs     = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-shell  = "2"
 tauri-plugin-sql    = { version = "2", features = ["sqlite"] }
-tauri-plugin-global-shortcut = "2"
-serde      = { version = "1", features = ["derive"] }
-serde_json = "1"
-tauri-plugin-notification = "2.3.3"
+serde               = { version = "1", features = ["derive"] }
+serde_json          = "1"
