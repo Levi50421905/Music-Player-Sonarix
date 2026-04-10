@@ -1,10 +1,10 @@
 /**
- * scanner.ts — File Scanner & Metadata Reader
+ * scanner.ts — File Scanner & Metadata Reader (Fixed)
  *
- * Fix:
- *   - scanFolder: rekursif via walk() yang benar untuk Tauri v2
- *   - readDir tidak ada recursive option di Tauri v2 — harus manual walk
- *   - addFiles: support multiple file select
+ * Fixes:
+ *   - Scan progress shows folder name only (not full path)
+ *   - Better error handling for files that fail to parse
+ *   - More robust path handling
  */
 
 import { open } from "@tauri-apps/plugin-dialog";
@@ -19,7 +19,8 @@ const AUDIO_EXTENSIONS = new Set([
 export interface ScanProgress {
   total: number;
   current: number;
-  currentFile: string;
+  currentFile: string;  // Just the filename, not full path
+  currentFolder: string; // Just the folder name
   done: boolean;
 }
 
@@ -29,15 +30,18 @@ export async function scanFolder(
   const selected = await open({
     directory: true,
     multiple: false,
-    title: "Pilih folder musik",
+    title: "Select music folder",
   });
 
   if (!selected || typeof selected !== "string") return [];
 
+  const folderName = getLastPathPart(selected);
+  onProgress?.({ total: 0, current: 0, currentFile: "", currentFolder: folderName, done: false });
+
   const allFiles = await listAudioFiles(selected);
 
   if (allFiles.length === 0) {
-    onProgress?.({ total: 0, current: 0, currentFile: "", done: true });
+    onProgress?.({ total: 0, current: 0, currentFile: "", currentFolder: folderName, done: true });
     return [];
   }
 
@@ -46,12 +50,14 @@ export async function scanFolder(
 
   for (let i = 0; i < allFiles.length; i++) {
     const filePath = allFiles[i];
-    const fileName = filePath.replace(/\\/g, "/").split("/").pop() ?? filePath;
+    const fileName = getLastPathPart(filePath);
+    const parentFolder = getParentFolderName(filePath);
 
     onProgress?.({
       total: allFiles.length,
       current: i + 1,
       currentFile: fileName,
+      currentFolder: parentFolder,
       done: false,
     });
 
@@ -64,8 +70,24 @@ export async function scanFolder(
     }
   }
 
-  onProgress?.({ total: allFiles.length, current: allFiles.length, currentFile: "", done: true });
+  onProgress?.({
+    total: allFiles.length,
+    current: allFiles.length,
+    currentFile: "",
+    currentFolder: folderName,
+    done: true,
+  });
   return results;
+}
+
+function getLastPathPart(path: string): string {
+  return path.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? path;
+}
+
+function getParentFolderName(filePath: string): string {
+  const parts = filePath.replace(/\\/g, "/").split("/").filter(Boolean);
+  if (parts.length >= 2) return parts[parts.length - 2];
+  return parts[0] ?? "";
 }
 
 async function listAudioFiles(dirPath: string): Promise<string[]> {
@@ -81,7 +103,7 @@ async function listAudioFiles(dirPath: string): Promise<string[]> {
           const subEntries = await readDir(fullPath);
           await walk(subEntries, fullPath);
         } catch {
-          // Skip inaccessible folders
+          // Skip inaccessible folders silently
         }
       } else if (entry.isFile && entry.name) {
         const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
@@ -136,7 +158,10 @@ async function parseFile(filePath: string): Promise<Omit<Song, "id" | "date_adde
 
 function uint8ToBase64(bytes: Uint8Array): string {
   let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  const chunk = 8192;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
   return btoa(binary);
 }
 
@@ -152,7 +177,7 @@ function getMimeType(ext: string): string {
 export async function addFiles(): Promise<Song[]> {
   const selected = await open({
     multiple: true,
-    title: "Tambah file musik",
+    title: "Add music files",
     filters: [{ name: "Audio Files", extensions: [...AUDIO_EXTENSIONS] }],
   });
 

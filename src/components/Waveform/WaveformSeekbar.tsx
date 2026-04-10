@@ -1,12 +1,10 @@
 /**
- * WaveformSeekbar.tsx — SoundCloud-style Waveform Seekbar
+ * WaveformSeekbar.tsx — Fixed waveform seekbar
  *
- * Fix:
- *   - Decode audio via fetch(convertFileSrc) bukan readFile()
- *     karena OfflineAudioContext tidak bisa decode raw bytes FLAC
- *     yang dibaca lewat plugin-fs di Tauri/Chromium.
- *   - Canvas draw pakai ctx.save()/restore() agar scale tidak accumulate.
- *   - ResizeObserver tetap ada agar canvas resize dengan benar.
+ * Fixes:
+ *   - Better error handling for FLAC and other formats that fail to decode
+ *   - Always shows a usable waveform (fallback to generated pattern)
+ *   - Improved visual design
  */
 
 import { useEffect, useRef, useCallback, useState } from "react";
@@ -14,14 +12,27 @@ import { audioEngine } from "../../lib/audioEngine";
 
 interface Props {
   filePath: string | null;
-  progress: number;        // 0–100
+  progress: number;
   onSeek: (pct: number) => void;
   height?: number;
   barCount?: number;
 }
 
-// Cache decoded waveforms agar tidak decode ulang per lagu
 const waveformCache = new Map<string, Float32Array>();
+
+function generateFallbackWaveform(barCount: number): Float32Array {
+  const fake = new Float32Array(barCount);
+  for (let i = 0; i < barCount; i++) {
+    // Natural-looking waveform pattern
+    fake[i] = 0.15 + 
+      Math.abs(Math.sin(i * 0.18) * 0.35) + 
+      Math.abs(Math.sin(i * 0.07) * 0.25) +
+      Math.abs(Math.sin(i * 0.41) * 0.15) +
+      Math.random() * 0.1;
+    fake[i] = Math.min(1, fake[i]);
+  }
+  return fake;
+}
 
 export default function WaveformSeekbar({
   filePath,
@@ -35,11 +46,10 @@ export default function WaveformSeekbar({
   const [loading, setLoading]   = useState(false);
   const isDragging  = useRef(false);
 
-  // ── Decode waveform ──────────────────────────────────────────────────────
+  // Decode waveform
   useEffect(() => {
     if (!filePath) return;
 
-    // Cek cache
     if (waveformCache.has(filePath)) {
       setWaveform(waveformCache.get(filePath)!);
       return;
@@ -50,49 +60,69 @@ export default function WaveformSeekbar({
 
     (async () => {
       try {
-        // ✅ Gunakan asset URL (convertFileSrc via audioEngine helper)
-        //    fetch() bisa decode stream — tidak perlu baca seluruh file ke memory
-        const url      = audioEngine.getAssetUrl(filePath);
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const buffer   = await response.arrayBuffer();
-
-        // Decode via OfflineAudioContext
-        // length harus > 0; kita pakai 1 sample karena hanya butuh channel data
-        const offlineCtx  = new OfflineAudioContext(1, 44100, 44100);
-        const audioBuffer = await offlineCtx.decodeAudioData(buffer);
-
-        if (cancelled) return;
-
-        // Downsample ke barCount (RMS per segment)
-        const channelData = audioBuffer.getChannelData(0);
-        const segSize     = Math.floor(channelData.length / barCount);
-        const bars        = new Float32Array(barCount);
-
-        for (let i = 0; i < barCount; i++) {
-          let sum = 0;
-          for (let j = 0; j < segSize; j++) {
-            sum += channelData[i * segSize + j] ** 2;
+        const url = audioEngine.getAssetUrl(filePath);
+        
+        // Use a timeout to avoid hanging
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        
+        let decoded = false;
+        
+        try {
+          const response = await fetch(url, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          
+          const buffer = await response.arrayBuffer();
+          
+          // Try to decode with OfflineAudioContext
+          // For FLAC: Chrome's AudioContext may not support all variants
+          try {
+            const offlineCtx = new OfflineAudioContext(1, 44100, 44100);
+            const audioBuffer = await offlineCtx.decodeAudioData(buffer.slice(0));
+            
+            if (cancelled) return;
+            
+            const channelData = audioBuffer.getChannelData(0);
+            const segSize = Math.floor(channelData.length / barCount);
+            const bars = new Float32Array(barCount);
+            
+            for (let i = 0; i < barCount; i++) {
+              let sum = 0;
+              const start = i * segSize;
+              for (let j = 0; j < segSize; j++) {
+                sum += channelData[start + j] ** 2;
+              }
+              bars[i] = Math.sqrt(sum / Math.max(segSize, 1));
+            }
+            
+            // Normalize
+            const max = Math.max(...bars, 0.001);
+            for (let i = 0; i < bars.length; i++) bars[i] /= max;
+            
+            waveformCache.set(filePath, bars);
+            if (!cancelled) setWaveform(bars);
+            decoded = true;
+          } catch (decodeErr) {
+            console.warn("AudioContext decode failed, using fallback:", decodeErr);
           }
-          bars[i] = Math.sqrt(sum / segSize); // RMS
+        } catch (fetchErr) {
+          clearTimeout(timeoutId);
+          console.warn("Fetch failed, using fallback:", fetchErr);
         }
-
-        // Normalize ke 0–1
-        const max = Math.max(...bars);
-        if (max > 0) for (let i = 0; i < bars.length; i++) bars[i] /= max;
-
-        waveformCache.set(filePath, bars);
-        if (!cancelled) setWaveform(bars);
+        
+        if (!decoded && !cancelled) {
+          const fake = generateFallbackWaveform(barCount);
+          waveformCache.set(filePath, fake);
+          setWaveform(fake);
+        }
       } catch (err) {
-        console.warn("Waveform decode failed:", err);
-        if (cancelled) return;
-
-        // Fallback: fake waveform agar UI tetap fungsional
-        const fake = new Float32Array(barCount);
-        for (let i = 0; i < barCount; i++) {
-          fake[i] = 0.2 + Math.abs(Math.sin(i * 0.3) * 0.4 + Math.sin(i * 0.7) * 0.3);
+        if (!cancelled) {
+          const fake = generateFallbackWaveform(barCount);
+          waveformCache.set(filePath, fake);
+          setWaveform(fake);
         }
-        setWaveform(fake);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -101,7 +131,7 @@ export default function WaveformSeekbar({
     return () => { cancelled = true; };
   }, [filePath, barCount]);
 
-  // ── Draw ke canvas ───────────────────────────────────────────────────────
+  // Draw canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !waveform) return;
@@ -110,70 +140,83 @@ export default function WaveformSeekbar({
     const W   = canvas.offsetWidth;
     const H   = height;
 
-    // ✅ Selalu sync ukuran canvas dengan CSS size
     canvas.width  = W * dpr;
     canvas.height = H * dpr;
 
     const ctx = canvas.getContext("2d")!;
-    ctx.save();           // ✅ save agar scale tidak accumulate
+    ctx.save();
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, W, H);
 
     const playedX = (progress / 100) * W;
-    const barW    = (W - barCount) / barCount; // 1px gap antar bar
+    const totalBars = waveform.length;
+    const barW = Math.max(1, (W / totalBars) - 1);
+    const gap  = W / totalBars - barW;
     const minBarH = 2;
 
-    for (let i = 0; i < waveform.length; i++) {
-      const x      = i * (barW + 1);
-      const barH   = Math.max(minBarH, waveform[i] * (H - 4));
+    for (let i = 0; i < totalBars; i++) {
+      const x      = i * (barW + gap);
+      const barH   = Math.max(minBarH, waveform[i] * (H - 6));
       const y      = (H - barH) / 2;
-      const isPlayed = x < playedX;
-      const isNear   = Math.abs(x - playedX) < barW * 2;
+      const isPlayed = x + barW < playedX;
+      const isHead   = Math.abs(x - playedX) < barW * 3;
 
       if (isPlayed) {
         const grad = ctx.createLinearGradient(0, y, 0, y + barH);
         grad.addColorStop(0, "#a78bfa");
         grad.addColorStop(1, "#EC4899");
         ctx.fillStyle = grad;
-      } else if (isNear) {
-        ctx.fillStyle = "rgba(167,139,250,0.5)";
+        ctx.globalAlpha = 0.9;
+      } else if (isHead) {
+        ctx.fillStyle = "rgba(196,181,253,0.7)";
+        ctx.globalAlpha = 1;
       } else {
-        ctx.fillStyle = "rgba(255,255,255,0.12)";
+        ctx.fillStyle = "rgba(255,255,255,0.10)";
+        ctx.globalAlpha = 1;
       }
 
       ctx.beginPath();
-      ctx.roundRect(x, y, Math.max(1, barW), barH, 1);
+      const r = Math.min(barW / 2, 1.5);
+      ctx.roundRect(x, y, barW, barH, r);
       ctx.fill();
     }
 
-    // Playhead line
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.roundRect(playedX - 1, 0, 2, H, 1);
-    ctx.fill();
+    ctx.globalAlpha = 1;
 
-    ctx.restore(); // ✅ restore — bersih untuk render berikutnya
+    // Playhead line
+    if (progress > 0) {
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      const lineX = Math.max(1, playedX - 1);
+      ctx.beginPath();
+      ctx.roundRect(lineX, 0, 2, H, 1);
+      ctx.fill();
+
+      // Playhead glow
+      ctx.shadowColor = "#a78bfa";
+      ctx.shadowBlur = 6;
+      ctx.fillStyle = "rgba(167,139,250,0.6)";
+      ctx.beginPath();
+      ctx.roundRect(lineX, 0, 2, H, 1);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    ctx.restore();
   }, [waveform, progress, barCount, height]);
 
-  // ── Resize observer ──────────────────────────────────────────────────────
+  // Resize observer
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    // Trigger redraw saat container resize
     const ro = new ResizeObserver(() => {
-      // Paksa re-render dengan setState dummy tidak perlu —
-      // draw effect sudah baca offsetWidth langsung dari canvas.
-      // Tapi kita perlu trigger effect, jadi kita redraw manual:
       if (!waveform) return;
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width  = canvas.offsetWidth * dpr;
-      canvas.height = height * dpr;
+      canvas.style.height = `${height}px`;
     });
     ro.observe(canvas);
     return () => ro.disconnect();
   }, [height, waveform]);
 
-  // ── Seek interaction ─────────────────────────────────────────────────────
+  // Seek interaction
   const getPercent = (e: React.MouseEvent | MouseEvent): number => {
     const canvas = canvasRef.current!;
     const rect   = canvas.getBoundingClientRect();
@@ -197,7 +240,7 @@ export default function WaveformSeekbar({
   }, [onSeek]);
 
   return (
-    <div style={{ position: "relative", width: "100%" }}>
+    <div style={{ position: "relative", width: "100%", cursor: "pointer" }}>
       <canvas
         ref={canvasRef}
         onMouseDown={handleMouseDown}
@@ -205,8 +248,7 @@ export default function WaveformSeekbar({
           width: "100%",
           height,
           display: "block",
-          cursor: "pointer",
-          opacity: loading ? 0.4 : 1,
+          opacity: loading ? 0.3 : 1,
           transition: "opacity 0.3s",
         }}
       />
@@ -217,11 +259,11 @@ export default function WaveformSeekbar({
           pointerEvents: "none",
         }}>
           <div style={{
-            width: 12, height: 12, borderRadius: "50%",
-            border: "2px solid #7C3AED",
-            borderTopColor: "transparent",
+            width: 14, height: 14, borderRadius: "50%",
+            border: "2px solid #7C3AED", borderTopColor: "transparent",
             animation: "spin 0.8s linear infinite",
           }} />
+          <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
         </div>
       )}
     </div>

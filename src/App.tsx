@@ -1,16 +1,14 @@
 /**
- * App.tsx (M5 — Final) — Root Component
+ * App.tsx — Root Component
  *
- * Tambahan dari M4:
- *   - Onboarding check (first launch)
- *   - Dashboard tab
- *   - Smart Playlists tab
- *   - Album & Artist view tab
- *   - WaveformSeekbar di PlayerBar
- *   - OS Notifications
- *
- * Fix: handleNext TDZ (Cannot access before initialization)
- *      — ref assignment dipindah ke setelah deklarasi handleNext
+ * Key behaviors:
+ *   - Queue only set when user explicitly plays something (not on init)
+ *   - repeat=all: loops back to start of queue
+ *   - repeat=one: replays same song
+ *   - repeat=off: stops at end
+ *   - Playing from Library sets queue to current filtered list
+ *   - Playing from Album/Playlist sets queue to that list
+ *   - preloadNext: pre-decodes next FLAC in background for smooth transitions
  */
 
 import { useEffect, useRef, useCallback, useState } from "react";
@@ -24,7 +22,6 @@ import { useKeyboardShortcuts } from "./components/Player/useKeyboardShortcuts";
 import { useTrackNotification, requestNotificationPermission } from "./components/Notification/useTrackNotification";
 import type { Song } from "./lib/db";
 
-// Components
 import Onboarding        from "./components/Onboarding/Onboarding";
 import Sidebar           from "./components/Sidebar";
 import LibraryView       from "./components/Library/LibraryView";
@@ -57,7 +54,7 @@ const TABS: { id: ActiveTab; label: string; icon: string }[] = [
 export default function App() {
   const [activeTab, setActiveTab]       = useState<ActiveTab>("home");
   const [showSettings, setShowSettings] = useState(false);
-  const [onboarding, setOnboarding]     = useState<boolean | null>(null); // null = loading
+  const [onboarding, setOnboarding]     = useState<boolean | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const isInitialized  = useRef(false);
 
@@ -65,25 +62,21 @@ export default function App() {
     currentSong, isPlaying, volume,
     setCurrentSong, setIsPlaying, setProgress, setCurrentTime,
     setDuration, nextTrack, prevTrack, addToHistory, setQueue,
-    toggleShuffle, cycleRepeat,
+    toggleShuffle, cycleRepeat, queue, queueIndex,
   } = usePlayerStore();
 
-  const {
-    songs, setSongs, setPlaylists, setLoading, setScanProgress,
-  } = useLibraryStore();
-
+  const { songs, setSongs, setPlaylists, setLoading, setScanProgress } = useLibraryStore();
   const { eqGains, accentColor, toggleLyrics } = useSettingsStore() as any;
   const { openMini, closeMini, isMiniOpen } = useMiniPlayer();
 
-  // OS notifications
   useTrackNotification();
 
-  // ── Apply accent color ──────────────────────────────────────────────────
+  // Apply accent color CSS variable
   useEffect(() => {
     if (accentColor) document.documentElement.style.setProperty("--accent", accentColor);
   }, [accentColor]);
 
-  // ── Check onboarding ────────────────────────────────────────────────────
+  // Check onboarding
   useEffect(() => {
     (async () => {
       try {
@@ -91,14 +84,13 @@ export default function App() {
         const done = await getSetting(db, "onboarded");
         setOnboarding(done !== "true");
       } catch {
-        setOnboarding(false); // error = skip onboarding
+        setOnboarding(false);
       }
     })();
-
     requestNotificationPermission();
   }, []);
 
-  // ── Init library ────────────────────────────────────────────────────────
+  // Init: load library BUT do NOT setQueue
   useEffect(() => {
     if (isInitialized.current || onboarding === null || onboarding === true) return;
     isInitialized.current = true;
@@ -111,20 +103,17 @@ export default function App() {
           getAllSongs(db),
           getPlaylists(db),
         ]);
-        setSongs(allSongs);
-        setPlaylists(allPlaylists);
-        setQueue(allSongs);
+        setSongs(Array.isArray(allSongs) ? allSongs : []);
+        setPlaylists(Array.isArray(allPlaylists) ? allPlaylists : []);
       } finally {
         setLoading(false);
       }
     })();
   }, [onboarding]);
 
-  // ── Audio engine: volume & EQ ───────────────────────────────────────────
   useEffect(() => { audioEngine.setVolume(volume); }, [volume]);
   useEffect(() => { if (eqGains) audioEngine.setEqPreset(eqGains); }, [eqGains]);
 
-  // ── Audio engine: time / metadata callbacks (stable, registered once) ───
   useEffect(() => {
     audioEngine.onTimeUpdate(t => {
       setCurrentTime(t);
@@ -133,17 +122,24 @@ export default function App() {
     audioEngine.onLoadedMetadata(d => setDuration(d));
   }, []);
 
-  // ── Stable ref for handleNext (avoids stale closure in onEnded) ─────────
-  // Deklarasi ref SEBELUM dipakai di useEffect onEnded,
-  // tapi assignment .current dilakukan SETELAH handleNext didefinisikan di bawah.
+  // Stable ref to avoid stale closure in onEnded
   const handleNextRef = useRef<() => void>(() => {});
-
   useEffect(() => {
-    // onEnded dipasang sekali; selalu memanggil versi terbaru via ref
     audioEngine.onEnded(() => handleNextRef.current());
   }, []);
 
-  // ── Playback ────────────────────────────────────────────────────────────
+  // Pre-load next track in background when queue changes or song changes
+  useEffect(() => {
+    const safeQueue = Array.isArray(queue) ? queue : [];
+    const safeIndex = typeof queueIndex === "number" ? queueIndex : 0;
+    const nextSong = safeQueue[safeIndex + 1];
+    if (nextSong?.path) {
+      // Fire and forget — background pre-decode + preload
+      audioEngine.preloadNext(nextSong.path).catch(() => {});
+    }
+  }, [currentSong?.id, queue, queueIndex]);
+
+  // Core: play a single song
   const playSong = useCallback(async (song: Song) => {
     setCurrentSong(song);
     setIsPlaying(true);
@@ -152,28 +148,41 @@ export default function App() {
       addToHistory(song.id);
       const db = await getDb();
       await recordPlay(db, song.id);
-      // Update play count di store secara optimistik
-      setSongs(songs.map(s =>
-        s.id === song.id ? { ...s, play_count: (s.play_count || 0) + 1 } : s
-      ));
-    } catch {
+      setSongs(prev => Array.isArray(prev)
+        ? prev.map(s => s.id === song.id ? { ...s, play_count: (s.play_count || 0) + 1 } : s)
+        : prev
+      );
+    } catch (err) {
+      console.error("playSong error:", err);
       setIsPlaying(false);
     }
-  }, [songs]);
+  }, []);
 
+  // Play a list starting at index — sets queue to that list
   const playList = useCallback((list: Song[], index = 0) => {
-    setQueue(list, index);
-    playSong(list[index]);
+    if (!Array.isArray(list) || list.length === 0) return;
+    const safeIndex = Math.max(0, Math.min(index, list.length - 1));
+    setQueue(list, safeIndex);
+    playSong(list[safeIndex]);
+
+    // Immediately pre-load the next track
+    const nextSong = list[safeIndex + 1];
+    if (nextSong?.path) {
+      audioEngine.preloadNext(nextSong.path).catch(() => {});
+    }
   }, [playSong]);
 
-  // ✅ handleNext didefinisikan SEBELUM handleNextRef.current di-assign
+  // Next: from queue — loops if repeat=all
   const handleNext = useCallback(() => {
     const next = nextTrack();
-    if (next) playSong(next);
-    else setIsPlaying(false);
+    if (next) {
+      playSong(next);
+    } else {
+      setIsPlaying(false);
+      audioEngine.stop();
+    }
   }, [nextTrack, playSong]);
 
-  // ✅ Assignment aman — handleNext sudah ada di scope ini
   handleNextRef.current = handleNext;
 
   const handlePrev = useCallback(() => {
@@ -197,18 +206,24 @@ export default function App() {
   }, [isPlaying, currentSong, playSong]);
 
   const handleRating = useCallback(async (songId: number, stars: number) => {
-    setSongs(songs.map(s => s.id === songId ? { ...s, stars } : s));
+    setSongs(prev => Array.isArray(prev)
+      ? prev.map(s => s.id === songId ? { ...s, stars } : s)
+      : prev
+    );
+    // Also update currentSong in player store if it's the same song
+    const { currentSong: cs, setCurrentSong: scs } = usePlayerStore.getState();
+    if (cs && cs.id === songId) {
+      scs({ ...cs, stars });
+    }
     const db = await getDb();
     await setRating(db, songId, stars);
-  }, [songs]);
+  }, [setSongs]);
 
-  // ── Scan ────────────────────────────────────────────────────────────────
   const handleScanFolder = useCallback(async () => {
     await scanFolder(p => setScanProgress(p));
     const db      = await getDb();
     const updated = await getAllSongs(db);
-    setSongs(updated);
-    setQueue(updated);
+    setSongs(Array.isArray(updated) ? updated : []);
     setScanProgress(null);
   }, []);
 
@@ -216,26 +231,17 @@ export default function App() {
     await addFiles();
     const db      = await getDb();
     const updated = await getAllSongs(db);
-    setSongs(updated);
-    setQueue(updated);
+    setSongs(Array.isArray(updated) ? updated : []);
   }, []);
 
-  // ── Onboarding complete ─────────────────────────────────────────────────
   const handleOnboardingComplete = useCallback((newSongs: Song[]) => {
-    setSongs(newSongs);
-    setQueue(newSongs);
+    setSongs(Array.isArray(newSongs) ? newSongs : []);
     setOnboarding(false);
     isInitialized.current = true;
   }, []);
 
-  // ── Mini player commands ────────────────────────────────────────────────
-  useMiniPlayerCommands({
-    onPlayPause: handlePlayPause,
-    onNext: handleNext,
-    onPrev: handlePrev,
-  });
+  useMiniPlayerCommands({ onPlayPause: handlePlayPause, onNext: handleNext, onPrev: handlePrev });
 
-  // ── Tauri media-key events ──────────────────────────────────────────────
   useEffect(() => {
     const uns: (() => void)[] = [];
     if (!(window as any).__TAURI_INTERNALS__) return;
@@ -247,7 +253,6 @@ export default function App() {
     return () => uns.forEach(f => f());
   }, [handlePlayPause, handleNext, handlePrev]);
 
-  // ── Keyboard shortcuts ──────────────────────────────────────────────────
   useKeyboardShortcuts({
     onPlayPause:     handlePlayPause,
     onNext:          handleNext,
@@ -263,7 +268,7 @@ export default function App() {
     },
   });
 
-  // ── Render: loading ─────────────────────────────────────────────────────
+  // ── Loading screen ────────────────────────────────────────────────────────
   if (onboarding === null) return (
     <div style={{
       height: "100vh", background: "#070710",
@@ -278,10 +283,9 @@ export default function App() {
     </div>
   );
 
-  // ── Render: onboarding ──────────────────────────────────────────────────
   if (onboarding) return <Onboarding onComplete={handleOnboardingComplete} />;
 
-  // ── Render: main app ────────────────────────────────────────────────────
+  // ── Main app ──────────────────────────────────────────────────────────────
   return (
     <div className="app-root">
       <ScanProgress />
@@ -291,7 +295,6 @@ export default function App() {
         <Sidebar onPlayPause={handlePlayPause} onRating={handleRating} />
 
         <div className="content">
-          {/* Tab navigation */}
           <nav className="tab-nav">
             <div className="logo">
               <span className="logo-icon">♪</span>
@@ -314,33 +317,45 @@ export default function App() {
 
             <div className="toolbar">
               <SleepTimerButton />
-              <button
-                className="icon-btn"
-                onClick={() => isMiniOpen() ? closeMini() : openMini()}
-                title="Mini Player"
-              >⬛</button>
+              <button className="icon-btn" onClick={() => isMiniOpen() ? closeMini() : openMini()} title="Mini Player (Ctrl+M)">⬛</button>
               <button className="icon-btn" onClick={handleScanFolder} title="Scan Folder">📁</button>
               <button className="icon-btn" onClick={handleAddFiles}   title="Add Files">➕</button>
-              <button className="icon-btn" onClick={() => setShowSettings(true)} title="Settings">⚙</button>
+              <button className="icon-btn" onClick={() => setShowSettings(true)} title="Settings (Ctrl+,)">⚙</button>
             </div>
           </nav>
 
-          {/* Tab content */}
           <div className="tab-content">
-            {activeTab === "home"      && <Dashboard onPlay={playList} onRating={handleRating} />}
-            {activeTab === "library"   && (
+            {activeTab === "home" && (
+              <Dashboard onPlay={playList} onRating={handleRating} />
+            )}
+
+            {activeTab === "library" && (
               <LibraryView
-                onPlay={song => { setQueue([song]); playSong(song); }}
+                onPlay={(song, contextList) => {
+                  if (contextList && contextList.length > 0) {
+                    const idx = contextList.findIndex(s => s.id === song.id);
+                    playList(contextList, idx >= 0 ? idx : 0);
+                  } else {
+                    playList([song], 0);
+                  }
+                }}
                 onRating={handleRating}
                 searchRef={searchInputRef}
               />
             )}
+
             {activeTab === "albums"    && <AlbumView onPlay={playList} />}
             {activeTab === "artists"   && <ArtistView onPlay={playList} />}
             {activeTab === "smart"     && <SmartPlaylistView onPlay={playList} />}
             {activeTab === "queue"     && <QueueView onPlay={song => playSong(song)} />}
             {activeTab === "equalizer" && <EqualizerView />}
-            {activeTab === "playlists" && <PlaylistsView onPlay={song => playSong(song)} />}
+
+            {activeTab === "playlists" && (
+              <PlaylistsView
+                onPlay={song => playSong(song)}
+                onPlayAll={songs => playList(songs, 0)}
+              />
+            )}
           </div>
         </div>
       </div>
