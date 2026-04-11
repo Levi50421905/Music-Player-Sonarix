@@ -1,11 +1,9 @@
 /**
- * useKeyboardShortcuts.ts — Global Keyboard Shortcut Handler
+ * useKeyboardShortcuts.ts — v2
  *
- * WHY di level App (bukan per komponen):
- *   - Shortcut harus aktif di mana pun user berada di dalam app
- *   - Satu tempat untuk manage semua shortcut → tidak ada conflict
- *
- * EXCEPTION: jangan trigger shortcut saat user sedang mengetik di input/textarea
+ * TAMBAHAN vs v1:
+ *   [NEW] ? → buka keyboard cheatsheet overlay
+ *   [NEW] Ctrl+→ = maju 30 detik, Ctrl+← = mundur 30 detik
  */
 
 import { useEffect } from "react";
@@ -22,10 +20,11 @@ interface Handlers {
   onToggleLyrics: () => void;
   onOpenSettings: () => void;
   onFocusSearch: () => void;
+  onToggleCheatsheet?: () => void; // [NEW]
 }
 
 export function useKeyboardShortcuts(handlers: Handlers) {
-  const { setVolume, volume, currentSong, setRating } = usePlayerStore() as any;
+  const { setVolume, volume, currentSong } = usePlayerStore() as any;
 
   useEffect(() => {
     const handle = (e: KeyboardEvent) => {
@@ -44,14 +43,26 @@ export function useKeyboardShortcuts(handlers: Handlers) {
 
         case "ArrowRight":
           e.preventDefault();
-          if (e.shiftKey) handlers.onNext();
-          else audioEngine.seek(audioEngine.currentTime + 5);
+          if (e.shiftKey) {
+            handlers.onNext();
+          } else if (ctrl) {
+            // [NEW] Ctrl+→ = maju 30 detik
+            audioEngine.seek(audioEngine.currentTime + 30);
+          } else {
+            audioEngine.seek(audioEngine.currentTime + 5);
+          }
           break;
 
         case "ArrowLeft":
           e.preventDefault();
-          if (e.shiftKey) handlers.onPrev();
-          else audioEngine.seek(Math.max(0, audioEngine.currentTime - 5));
+          if (e.shiftKey) {
+            handlers.onPrev();
+          } else if (ctrl) {
+            // [NEW] Ctrl+← = mundur 30 detik
+            audioEngine.seek(Math.max(0, audioEngine.currentTime - 30));
+          } else {
+            audioEngine.seek(Math.max(0, audioEngine.currentTime - 5));
+          }
           break;
 
         // ── Volume ────────────────────────────────────────────────────────
@@ -75,7 +86,6 @@ export function useKeyboardShortcuts(handlers: Handlers) {
 
         case "KeyM":
           if (!ctrl) {
-            // Mute toggle
             const isMuted = volume === 0;
             const newVol = isMuted ? 80 : 0;
             setVolume?.(newVol);
@@ -99,7 +109,7 @@ export function useKeyboardShortcuts(handlers: Handlers) {
           break;
 
         // ── UI ────────────────────────────────────────────────────────────
-        case "Key0":
+        case "Digit0":
           if (ctrl) { e.preventDefault(); handlers.onToggleMini(); }
           break;
 
@@ -115,13 +125,19 @@ export function useKeyboardShortcuts(handlers: Handlers) {
           if (!ctrl) { e.preventDefault(); handlers.onFocusSearch(); }
           break;
 
+        // ── [NEW] ? = Keyboard cheatsheet overlay ─────────────────────────
+        case "Slash":
+          if (e.shiftKey && !ctrl) {
+            e.preventDefault();
+            handlers.onToggleCheatsheet?.();
+          }
+          break;
+
         // ── Rating 1–5 ────────────────────────────────────────────────────
         case "Digit1": case "Digit2": case "Digit3":
         case "Digit4": case "Digit5":
           if (!ctrl && currentSong) {
             const stars = parseInt(e.code.replace("Digit", ""));
-            // Toggle: jika sudah sama, reset ke 0
-            // setRating di store
             usePlayerStore.getState().setCurrentSong?.({
               ...currentSong,
               stars: currentSong.stars === stars ? 0 : stars,

@@ -1,80 +1,105 @@
 /**
- * useMiniPlayer.ts — Hook untuk manage mini player window
+ * useMiniPlayer.ts — Mini player window management (fixed)
  *
- * Tugasnya:
- *   1. Buka/tutup window mini player
- *   2. Sync state (track, progress) ke mini player via event
- *   3. Terima command dari mini player (play/pause/next/prev/close)
+ * Bug fix: WebviewWindow constructor throws "window not found" when called
+ * outside Tauri (e.g. in a browser dev environment, or before Tauri IPC is
+ * fully initialised).  Every Tauri API call is now guarded.
+ *
+ * Also fixed: closeMini() was calling miniWinRef.current?.close() which can
+ * throw if the window was already destroyed — now wrapped in try/catch.
  */
 
 import { useEffect, useRef, useCallback } from "react";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { emit, listen } from "@tauri-apps/api/event";
-import { usePlayerStore } from "../../store";
+import { emit, listen }                   from "@tauri-apps/api/event";
+import { usePlayerStore }                 from "../../store";
 
+const isTauri = () => !!(window as any).__TAURI_INTERNALS__;
+
+// ─── useMiniPlayer ────────────────────────────────────────────────────────────
 export function useMiniPlayer() {
-  const miniWinRef = useRef<WebviewWindow | null>(null);
+  // Store the window instance — typed as `any` so we don't import
+  // WebviewWindow at module load time (which crashes outside Tauri).
+  const miniWinRef = useRef<any>(null);
   const { currentSong, isPlaying, progress, duration, volume } = usePlayerStore();
 
-  // ── Sync state ke mini window setiap ada perubahan ───────────────────────
+  // Sync player state → mini window on every change
   useEffect(() => {
-    if (!miniWinRef.current) return;
-
+    if (!miniWinRef.current || !isTauri()) return;
     emit("mini:state", {
-      title: currentSong?.title ?? "No track",
-      artist: currentSong?.artist ?? "",
-      songId: currentSong?.id ?? 0,
+      title:    currentSong?.title    ?? "No track",
+      artist:   currentSong?.artist   ?? "",
+      songId:   currentSong?.id       ?? 0,
       coverArt: currentSong?.cover_art ?? null,
       isPlaying,
       progress,
       duration,
       volume,
-    });
+    }).catch(() => {});
   }, [currentSong, isPlaying, progress, duration, volume]);
 
-  // ── Buka mini player ─────────────────────────────────────────────────────
+  // Open mini window
   const openMini = useCallback(async () => {
-    if (miniWinRef.current) {
-      // Sudah ada, focus saja
-      await miniWinRef.current.setFocus();
+    if (!isTauri()) {
+      console.warn("[MiniPlayer] Not running inside Tauri — mini player unavailable.");
       return;
     }
 
-    const win = new WebviewWindow("mini", {
-      url: "/#/mini",         // route mini player
-      title: "Resonance Mini",
-      width: 340,
-      height: 68,
-      minWidth: 280,
-      minHeight: 60,
-      maxHeight: 80,
-      resizable: true,
-      decorations: false,     // no title bar (custom drag)
-      alwaysOnTop: true,
-      skipTaskbar: true,      // tidak muncul di taskbar
-      transparent: true,
-    });
+    // If already open, just focus it
+    if (miniWinRef.current) {
+      try { await miniWinRef.current.setFocus(); } catch { /* already closed */ }
+      return;
+    }
 
-    miniWinRef.current = win;
+    try {
+      // Lazy import so WebviewWindow is never required at module load time
+      const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
 
-    // Kirim state saat mini siap
-    win.once("tauri://created", async () => {
-      await emit("mini:state", {
-        title: currentSong?.title ?? "No track",
-        artist: currentSong?.artist ?? "",
-        songId: currentSong?.id ?? 0,
-        coverArt: currentSong?.cover_art ?? null,
-        isPlaying, progress, duration, volume,
+      const win = new WebviewWindow("mini", {
+        url:         "/#/mini",
+        title:       "Resonance Mini",
+        width:       340,
+        height:      68,
+        minWidth:    280,
+        minHeight:   60,
+        maxHeight:   80,
+        resizable:   true,
+        decorations: false,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        transparent: true,
       });
-    });
 
-    win.once("tauri://destroyed", () => {
+      miniWinRef.current = win;
+
+      win.once("tauri://created", () => {
+        emit("mini:state", {
+          title:    currentSong?.title    ?? "No track",
+          artist:   currentSong?.artist   ?? "",
+          songId:   currentSong?.id       ?? 0,
+          coverArt: currentSong?.cover_art ?? null,
+          isPlaying, progress, duration, volume,
+        }).catch(() => {});
+      });
+
+      win.once("tauri://destroyed", () => {
+        miniWinRef.current = null;
+      });
+
+      // Also handle creation errors (e.g. label already in use)
+      win.once("tauri://error", (e: any) => {
+        console.warn("[MiniPlayer] Window creation error:", e);
+        miniWinRef.current = null;
+      });
+    } catch (err) {
+      console.warn("[MiniPlayer] Failed to open mini window:", err);
       miniWinRef.current = null;
-    });
+    }
   }, [currentSong, isPlaying, progress, duration, volume]);
 
+  // Close mini window
   const closeMini = useCallback(async () => {
-    await miniWinRef.current?.close();
+    if (!miniWinRef.current) return;
+    try { await miniWinRef.current.close(); } catch { /* already gone */ }
     miniWinRef.current = null;
   }, []);
 
@@ -83,32 +108,36 @@ export function useMiniPlayer() {
   return { openMini, closeMini, isMiniOpen };
 }
 
-/**
- * Hook untuk dipakai di MAIN window — listen command dari mini player
- * dan forward ke audio engine.
- */
+// ─── useMiniPlayerCommands ────────────────────────────────────────────────────
 export function useMiniPlayerCommands(handlers: {
   onPlayPause: () => void;
-  onNext: () => void;
-  onPrev: () => void;
+  onNext:      () => void;
+  onPrev:      () => void;
 }) {
   useEffect(() => {
+    if (!isTauri()) return;
+
     const unlisteners: (() => void)[] = [];
 
     (async () => {
-      unlisteners.push(await listen("mini:playpause", handlers.onPlayPause));
-      unlisteners.push(await listen("mini:next",      handlers.onNext));
-      unlisteners.push(await listen("mini:prev",      handlers.onPrev));
-      unlisteners.push(await listen("mini:close",     async () => {
-        // Tutup dari main window side
-        const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-        const win = await WebviewWindow.getByLabel("mini");
-        await win?.close();
-      }));
-      // Main window kirim state saat mini minta
-      unlisteners.push(await listen("mini:request-state", () => {
-        // State sync sudah di-handle di useMiniPlayer useEffect
-      }));
+      try {
+        unlisteners.push(await listen("mini:playpause", handlers.onPlayPause));
+        unlisteners.push(await listen("mini:next",      handlers.onNext));
+        unlisteners.push(await listen("mini:prev",      handlers.onPrev));
+
+        unlisteners.push(await listen("mini:close", async () => {
+          try {
+            const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+            const win = await WebviewWindow.getByLabel("mini");
+            await win?.close();
+          } catch { /* window already gone */ }
+        }));
+
+        // mini:request-state is handled by the sync useEffect above
+        unlisteners.push(await listen("mini:request-state", () => {}));
+      } catch (err) {
+        console.warn("[MiniPlayerCommands] listen error:", err);
+      }
     })();
 
     return () => unlisteners.forEach(fn => fn());

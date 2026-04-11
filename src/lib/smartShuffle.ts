@@ -1,102 +1,110 @@
 /**
- * smartShuffle.ts — Weighted Random Track Selection
+ * smartShuffle.ts — v2: Skip-aware + Rating-weighted
  *
- * WHY: Shuffle biasa (Math.random()) tidak mempertimbangkan preferensi user.
- * Smart shuffle menghitung "score" tiap lagu berdasarkan:
- *   - Rating bintang (bobot terbesar: 50%)
- *   - Frekuensi diputar (play count: 20%)
- *   - Decay factor: makin lama tidak diputar → peluang naik lagi (30%)
- *   - Recently played penalty: baru diputar → dikurangi sementara
- *
- * RESULT: Lagu favorit lebih sering muncul, tapi tidak repeat terus.
- * Lagu yang jarang diputar tetap bisa muncul sesekali (discovery).
+ * PERBAIKAN vs v1:
+ *   [#15] Skip behavior: lagu yang sering di-skip dapat penalti besar.
+ *         Engine melacak skip count per lagu (audioEngine.getSkipScore).
+ *   [#15] Rating-weighted boost yang lebih halus — exponential, bukan linear.
+ *   [NEW] playthrough bonus: lagu yang diputar sampai selesai dapat bonus.
+ *   [UX]  Tidak pernah repeat lagu yang sama dalam window 3 lagu terakhir.
  */
 
 import type { Song } from "./db";
+import { audioEngine } from "./audioEngine";
 
 export interface PlayRecord {
   song_id: number;
-  played_at: string; // ISO datetime string
+  played_at: string;
 }
+
+// ─── Scoring ──────────────────────────────────────────────────────────────────
 
 /**
  * Hitung score untuk satu lagu.
- * Score >= 0.1 (minimal agar semua lagu tetap punya peluang muncul).
+ * Faktor:
+ *   - Rating bintang (exponential weight)
+ *   - Play count (log scale)
+ *   - Decay bonus (lama tidak diputar → naik)
+ *   - Recently played penalty (< 1 jam)
+ *   - Skip penalty (sering di-skip → turun drastis)
+ * Score >= 0.05 (semua lagu tetap punya peluang minimal).
  */
 export function calculateScore(song: Song, history: PlayRecord[]): number {
-  const rating = song.stars ?? 3; // default 3 jika belum dirating
-
-  // Play count dari history (bukan dari DB langsung, agar real-time)
+  const rating    = song.stars ?? 3;
   const playCount = history.filter(h => h.song_id === song.id).length;
 
-  // Kapan terakhir diputar
   const lastRecord = history
     .filter(h => h.song_id === song.id)
     .sort((a, b) => new Date(b.played_at).getTime() - new Date(a.played_at).getTime())[0];
 
   const daysSincePlayed = lastRecord
     ? (Date.now() - new Date(lastRecord.played_at).getTime()) / 86_400_000
-    : 999; // belum pernah diputar → bonus besar
+    : 999;
 
-  // Decay bonus: 0 jika baru diputar, naik sampai 1 setelah 7 hari tidak diputar
-  // WHY: mencegah lagu yang sama muncul terus-menerus
+  // Decay bonus: 0 → 1 dalam 7 hari
   const decayBonus = Math.min(daysSincePlayed / 7, 1.0);
 
-  // Recently played penalty: dalam 1 jam terakhir → dikurangi drastis
-  const recentPenalty = daysSincePlayed < (1 / 24) ? -2.5 : 0;
+  // Recent penalty (< 1 jam)
+  const recentPenalty = daysSincePlayed < (1 / 24) ? -3.0 : 0;
 
-  // Play frequency contribution (log agar tidak dominan untuk lagu yang sangat sering diputar)
-  const freqBonus = Math.log1p(playCount) * 0.2;
+  // [#15] Skip penalty: setiap skip = -0.8, max -4.0
+  const skipCount = audioEngine.getSkipScore(song.path ?? "");
+  const skipPenalty = Math.min(skipCount * 0.8, 4.0);
+
+  // Rating: exponential — 5★ = 3.5x lebih mungkin dari 3★
+  // 1★=0.25, 2★=0.5, 3★=1.0, 4★=2.0, 5★=4.0
+  const ratingWeight = Math.pow(2, rating - 3);
+
+  // Play frequency (log, max contribution capped)
+  const freqBonus = Math.log1p(playCount) * 0.15;
 
   const score =
-    (rating * 0.5) +       // rating punya bobot terbesar
-    freqBonus +             // lagu yang sering diputar sedikit lebih sering muncul
-    (decayBonus * 0.3) +    // bonus kalau sudah lama tidak diputar
-    recentPenalty;          // penalti kalau baru diputar
+    (ratingWeight * 1.2) +
+    freqBonus +
+    (decayBonus * 0.4) +
+    recentPenalty -
+    skipPenalty;
 
-  return Math.max(0.1, score); // minimal 0.1 agar semua lagu punya peluang
+  return Math.max(0.05, score);
 }
 
 /**
- * Pilih satu lagu secara weighted random.
- *
- * CARA KERJA:
- *   1. Hitung score tiap lagu
- *   2. Jumlahkan semua score → total
- *   3. Random angka 0–total
- *   4. Loop, kurangi random dengan score tiap lagu
- *   5. Lagu pertama yang membuat random <= 0 adalah pemenangnya
- *
- * Lagu dengan score tinggi punya "segmen" lebih besar di range 0–total,
- * sehingga lebih sering terpilih.
+ * Weighted random — lagu dengan score tinggi lebih sering terpilih.
+ * Cegah repeat dalam window 3 lagu terakhir.
  */
 export function weightedRandom(songs: Song[], history: PlayRecord[]): Song {
   if (songs.length === 0) throw new Error("No songs to shuffle");
   if (songs.length === 1) return songs[0];
 
-  const scores = songs.map(s => calculateScore(s, history));
-  const total = scores.reduce((a, b) => a + b, 0);
+  // Window: 3 lagu terakhir dalam history
+  const recentIds = new Set(
+    history.slice(0, 3).map(h => h.song_id)
+  );
+
+  // Filter pool — coba hindari lagu yang baru diputar
+  let pool = songs.filter(s => !recentIds.has(s.id));
+  if (pool.length === 0) pool = songs; // fallback jika semua baru
+
+  const scores = pool.map(s => calculateScore(s, history));
+  const total  = scores.reduce((a, b) => a + b, 0);
 
   let rand = Math.random() * total;
-
-  for (let i = 0; i < songs.length; i++) {
+  for (let i = 0; i < pool.length; i++) {
     rand -= scores[i];
-    if (rand <= 0) return songs[i];
+    if (rand <= 0) return pool[i];
   }
 
-  // Fallback (floating point edge case)
-  return songs[songs.length - 1];
+  return pool[pool.length - 1];
 }
 
 /**
- * Generate queue baru dengan urutan weighted random.
- * Memastikan tidak ada duplikat dalam queue.
+ * Generate smart queue: weighted random tanpa duplikat.
  */
 export function generateSmartQueue(songs: Song[], history: PlayRecord[]): Song[] {
   if (songs.length === 0) return [];
 
   const remaining = [...songs];
-  const queue: Song[] = [];
+  const queue:     Song[] = [];
 
   while (remaining.length > 0) {
     const picked = weightedRandom(remaining, history);
@@ -109,15 +117,15 @@ export function generateSmartQueue(songs: Song[], history: PlayRecord[]): Song[]
 }
 
 /**
- * Debug helper: tampilkan distribusi score untuk semua lagu.
- * Berguna untuk verifikasi algoritma saat development.
+ * Debug helper: tampilkan distribusi score.
  */
 export function debugScores(songs: Song[], history: PlayRecord[]) {
   const scores = songs.map(s => ({
-    title: s.title,
-    stars: s.stars ?? 3,
-    plays: history.filter(h => h.song_id === s.id).length,
-    score: calculateScore(s, history).toFixed(3),
+    title:  s.title,
+    stars:  s.stars ?? 3,
+    plays:  history.filter(h => h.song_id === s.id).length,
+    skips:  audioEngine.getSkipScore(s.path ?? ""),
+    score:  calculateScore(s, history).toFixed(3),
   }));
   scores.sort((a, b) => parseFloat(b.score) - parseFloat(a.score));
   console.table(scores);

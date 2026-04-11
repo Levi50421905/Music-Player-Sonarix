@@ -1,13 +1,11 @@
 /**
- * Dashboard.tsx — Home Screen: Stats, Recently Played, Top Tracks
+ * Dashboard.tsx — v2
  *
- * Sections:
- *   1. Stats overview (total tracks, total duration, lossless %, avg rating)
- *   2. Now Playing (large card)
- *   3. Recently Played (horizontal scroll)
- *   4. Top Tracks by plays
- *   5. Top Rated
- *   6. Listening heatmap (hari apa paling sering dengarkan musik)
+ * FIX:
+ *   - Most Played: klik lagu → play dari seluruh list topByPlays (bukan 1 lagu)
+ *   - Top Rated: sama, play dari list topByRating
+ *   - Recently Played: play dari list recentlyPlayed
+ *   - onPlay sekarang: onPlay(songs: Song[], index: number)
  */
 
 import { useMemo } from "react";
@@ -21,18 +19,18 @@ interface Props {
   onRating: (songId: number, stars: number) => void;
 }
 
-const fmt = (s: number) => `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,"0")}`;
+const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 export default function Dashboard({ onPlay, onRating }: Props) {
   const { songs } = useLibraryStore();
   const { currentSong, isPlaying, history } = usePlayerStore();
 
-  // ── Stats ────────────────────────────────────────────────────────────────
+  // ── Stats ─────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
     const totalDuration = songs.reduce((a, s) => a + (s.duration || 0), 0);
-    const lossless = songs.filter(s => ["FLAC","WAV","ALAC","APE"].includes((s.format||"").toUpperCase())).length;
-    const rated = songs.filter(s => s.stars && s.stars > 0);
-    const avgRating = rated.length > 0
+    const lossless      = songs.filter(s => ["FLAC","WAV","ALAC","APE"].includes((s.format||"").toUpperCase())).length;
+    const rated         = songs.filter(s => s.stars && s.stars > 0);
+    const avgRating     = rated.length > 0
       ? (rated.reduce((a, s) => a + (s.stars || 0), 0) / rated.length).toFixed(1)
       : "—";
     const totalPlays = history.length;
@@ -49,7 +47,7 @@ export default function Dashboard({ onPlay, onRating }: Props) {
 
   // ── Recently Played ───────────────────────────────────────────────────────
   const recentlyPlayed = useMemo(() => {
-    const seen = new Set<number>();
+    const seen   = new Set<number>();
     const result: Song[] = [];
     for (const record of history) {
       if (!seen.has(record.song_id)) {
@@ -69,22 +67,24 @@ export default function Dashboard({ onPlay, onRating }: Props) {
   );
 
   const topByRating = useMemo(() =>
-    songs.filter(s => s.stars && s.stars >= 4).sort((a, b) => (b.stars || 0) - (a.stars || 0)).slice(0, 10),
+    songs.filter(s => s.stars && s.stars >= 4)
+      .sort((a, b) => (b.stars || 0) - (a.stars || 0))
+      .slice(0, 10),
     [songs]
   );
 
-  // ── Listening heatmap (by day of week from history) ───────────────────────
+  // ── Heatmap ───────────────────────────────────────────────────────────────
   const heatmap = useMemo(() => {
     const days = new Array(7).fill(0);
     for (const record of history) {
-      const day = new Date(record.played_at).getDay(); // 0=Sun
+      const day = new Date(record.played_at).getDay();
       days[day]++;
     }
     const max = Math.max(...days, 1);
     return days.map(v => v / max);
   }, [history]);
 
-  const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dayLabels = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 
   if (songs.length === 0) {
     return (
@@ -102,10 +102,10 @@ export default function Dashboard({ onPlay, onRating }: Props) {
       {/* ── Stats row ── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10 }}>
         {[
-          { icon: "🎵", value: stats.tracks, label: "Tracks" },
-          { icon: "⏱️", value: `${stats.hours}h`, label: "Total Duration" },
+          { icon: "🎵", value: stats.tracks, label: "Total Lagu" },
+          { icon: "⏱️", value: `${stats.hours}j`, label: "Total Durasi" },
           { icon: "💎", value: `${stats.losslessPct}%`, label: "Lossless" },
-          { icon: "⭐", value: stats.avgRating, label: "Avg Rating" },
+          { icon: "⭐", value: stats.avgRating, label: "Rata-rata Rating" },
           { icon: "▶️", value: stats.totalPlays, label: "Total Plays" },
         ].map(stat => (
           <div key={stat.label} style={{
@@ -121,12 +121,12 @@ export default function Dashboard({ onPlay, onRating }: Props) {
 
       {/* ── Recently Played ── */}
       {recentlyPlayed.length > 0 && (
-        <Section title="Recently Played" icon="🕐">
+        <Section title="Baru Diputar" icon="🕐">
           <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8 }}>
             {recentlyPlayed.map((song, i) => (
               <div
                 key={song.id}
-                onClick={() => onPlay([song])}
+                onClick={() => onPlay(recentlyPlayed, i)}   // ← FIX: play dari list
                 style={{
                   flexShrink: 0, width: 130, cursor: "pointer",
                   borderRadius: 10, overflow: "hidden",
@@ -152,20 +152,32 @@ export default function Dashboard({ onPlay, onRating }: Props) {
       {/* ── Top Tracks ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
 
-        {/* By plays */}
-        <Section title="Most Played" icon="🔥">
+        {/* Most Played — FIX: onPlay(topByPlays, i) bukan onPlay([song]) */}
+        <Section title="Paling Sering Diputar" icon="🔥">
           {topByPlays.map((song, i) => (
-            <TrackRow key={song.id} song={song} rank={i+1} onPlay={() => onPlay([song])} onRating={onRating} suffix={`${song.play_count || 0} plays`} />
+            <TrackRow
+              key={song.id}
+              song={song}
+              rank={i + 1}
+              onPlay={() => onPlay(topByPlays, i)}   // ← FIX
+              onRating={onRating}
+              suffix={`${song.play_count || 0}×`}
+            />
           ))}
         </Section>
 
-        {/* By rating */}
-        <Section title="Top Rated" icon="⭐">
+        {/* Top Rated — FIX: sama */}
+        <Section title="Rating Tertinggi" icon="⭐">
           {topByRating.length === 0 ? (
             <p style={{ fontSize: 12, color: "#4b5563" }}>Rating beberapa lagu dulu!</p>
           ) : (
             topByRating.map((song, i) => (
-              <TrackRow key={song.id} song={song} rank={i+1} onPlay={() => onPlay([song])} onRating={onRating}
+              <TrackRow
+                key={song.id}
+                song={song}
+                rank={i + 1}
+                onPlay={() => onPlay(topByRating, i)}   // ← FIX
+                onRating={onRating}
                 suffix={<span style={{ color: "#F59E0B" }}>{"★".repeat(song.stars || 0)}</span>}
               />
             ))
@@ -173,9 +185,9 @@ export default function Dashboard({ onPlay, onRating }: Props) {
         </Section>
       </div>
 
-      {/* ── Listening Heatmap ── */}
+      {/* ── Heatmap ── */}
       {history.length > 0 && (
-        <Section title="Listening Activity" icon="📊">
+        <Section title="Aktivitas Mendengarkan" icon="📊">
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end", height: 60 }}>
             {heatmap.map((intensity, i) => (
               <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
@@ -184,9 +196,7 @@ export default function Dashboard({ onPlay, onRating }: Props) {
                   height: `${Math.max(6, intensity * 52)}px`,
                   background: intensity > 0.7
                     ? "linear-gradient(to top, #7C3AED, #EC4899)"
-                    : intensity > 0.3
-                    ? "rgba(124,58,237,0.5)"
-                    : "#1a1a2e",
+                    : intensity > 0.3 ? "rgba(124,58,237,0.5)" : "#1a1a2e",
                   transition: "height 0.3s ease",
                 }} />
                 <span style={{ fontSize: 9, color: "#4b5563" }}>{dayLabels[i]}</span>
@@ -194,7 +204,7 @@ export default function Dashboard({ onPlay, onRating }: Props) {
             ))}
           </div>
           <p style={{ fontSize: 11, color: "#4b5563", marginTop: 8 }}>
-            Berdasarkan {history.length} play sessions
+            Berdasarkan {history.length} sesi play
           </p>
         </Section>
       )}
@@ -202,7 +212,8 @@ export default function Dashboard({ onPlay, onRating }: Props) {
   );
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── Sub-components ─────────────────────────────────────────────────────────────
+
 function Section({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
   return (
     <div>
@@ -222,15 +233,22 @@ function TrackRow({ song, rank, onPlay, onRating, suffix }: {
   suffix: React.ReactNode;
 }) {
   return (
-    <div onClick={onPlay} style={{
-      display: "flex", alignItems: "center", gap: 10,
-      padding: "6px 8px", borderRadius: 8, marginBottom: 2,
-      cursor: "pointer", transition: "background 0.1s",
-    }}
+    <div
+      onClick={onPlay}
+      style={{
+        display: "flex", alignItems: "center", gap: 10,
+        padding: "6px 8px", borderRadius: 8, marginBottom: 2,
+        cursor: "pointer",
+      }}
       onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.03)")}
       onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
     >
-      <span style={{ width: 18, fontSize: 11, color: rank <= 3 ? "#F59E0B" : "#4b5563", fontWeight: rank <= 3 ? 700 : 400, fontFamily: "monospace", textAlign: "center" }}>
+      <span style={{
+        width: 18, fontSize: 11,
+        color: rank <= 3 ? "#F59E0B" : "#4b5563",
+        fontWeight: rank <= 3 ? 700 : 400,
+        fontFamily: "monospace", textAlign: "center",
+      }}>
         {rank}
       </span>
       <CoverArt id={song.id} coverArt={song.cover_art} size={32} />
@@ -244,3 +262,5 @@ function TrackRow({ song, rank, onPlay, onRating, suffix }: {
     </div>
   );
 }
+
+import React from "react";

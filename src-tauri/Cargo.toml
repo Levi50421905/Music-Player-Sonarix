@@ -15,15 +15,16 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri               = { version = "2", features = ["protocol-asset"] }
+tauri               = { version = "2", features = ["protocol-asset", "webview-data-url"] }
 tauri-plugin-fs     = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-shell  = "2"
+tauri-plugin-notification = "2"
 tauri-plugin-sql    = { version = "2", features = ["sqlite"] }
 serde               = { version = "1", features = ["derive"] }
 serde_json          = "1"
-# Audio decode for FLAC and other formats
 claxon              = "0.4"
-# WAV decode
 hound               = "3"
 base64              = "0.22"
+# [#19] Async background decode queue
+tokio               = { version = "1", features = ["sync", "rt", "rt-multi-thread", "macros"] }

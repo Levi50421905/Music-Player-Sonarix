@@ -1,3 +1,13 @@
+/**
+ * index.css — v3
+ *
+ * FIX:
+ *   - Tab nav responsive: label tersembunyi saat window kecil
+ *   - Tab nav tidak overflow / terpotong
+ *   - Tab button hanya tampilkan icon saat sempit
+ *   - PlayerBar height variable konsisten
+ */
+
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Space+Mono:wght@400;700&display=swap');
 
 *, *::before, *::after {
@@ -7,27 +17,29 @@
 }
 
 :root {
-  --bg-base:    #0a0a14;
-  --bg-surface: #0d0d1f;
-  --bg-overlay: #1a1a2e;
-  --bg-muted:   #2a2a3e;
+  --bg-base:      #07071a;
+  --bg-surface:   #0b0b1e;
+  --bg-overlay:   #13132a;
+  --bg-muted:     #1e1e38;
   --text-primary: #e2e8f0;
-  --text-secondary: #9ca3af;
-  --text-muted:  #6b7280;
-  --text-faint:  #4b5563;
-  --accent:      #7C3AED;
+  --text-secondary:#9ca3af;
+  --text-muted:   #6b7280;
+  --text-faint:   #4b5563;
+  --accent:       #7C3AED;
   --accent-light: #a78bfa;
-  --accent-pink: #EC4899;
-  --success:     #10B981;
-  --border:      #1a1a2e;
-  --border-muted: #2a2a3e;
+  --accent-pink:  #EC4899;
+  --success:      #10B981;
+  --border:       #13132a;
+  --border-muted: #1e1e38;
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.5);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.7);
+  --player-bar-height: 124px;
 }
 
-/* ── Reset ── */
-html {
-  height: 100%;
-  overflow: hidden;
-}
+/* ── Reset ──────────────────────────────────────────────────────────────────── */
+html { height: 100%; overflow: hidden; }
 
 body {
   height: 100%;
@@ -47,13 +59,16 @@ body {
   flex-direction: column;
 }
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 4px; height: 4px; }
+/* ── Scrollbar ──────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--bg-muted); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+::-webkit-scrollbar-thumb {
+  background: rgba(124,58,237,0.25);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(124,58,237,0.5); }
 
-/* ── Range input ── */
+/* ── Range input ────────────────────────────────────────────────────────────── */
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
@@ -68,26 +83,23 @@ input[type="range"]::-webkit-slider-runnable-track {
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 12px;
-  height: 12px;
+  width: 11px; height: 11px;
   border-radius: 50%;
   background: var(--accent);
-  margin-top: -4.5px;
-  transition: transform 0.1s;
+  margin-top: -4px;
+  transition: transform 0.15s cubic-bezier(0.34,1.56,0.64,1);
 }
-input[type="range"]:hover::-webkit-slider-thumb {
-  transform: scale(1.2);
-}
+input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.25); }
 
-/* ── Button reset ── */
+/* ── Button reset ───────────────────────────────────────────────────────────── */
 button {
   font-family: inherit;
-  transition: opacity 0.15s, transform 0.1s;
+  transition: opacity 0.15s, transform 0.15s cubic-bezier(0.34,1.56,0.64,1);
 }
-button:active { transform: scale(0.95); }
-button:disabled { opacity: 0.4; cursor: not-allowed; }
+button:active  { transform: scale(0.93) !important; }
+button:disabled { opacity: 0.35; cursor: not-allowed; }
 
-/* ── App layout ── */
+/* ── App layout ─────────────────────────────────────────────────────────────── */
 .app-root {
   display: flex;
   flex-direction: column;
@@ -95,14 +107,14 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   width: 100vw;
   overflow: hidden;
   background: var(--bg-base);
-  position: relative; /* bukan fixed — fixed break flex children */
+  position: relative;
 }
 
 .layout {
   display: flex;
   flex: 1;
   overflow: hidden;
-  min-height: 0; /* KRITIS: tanpa ini flex child tidak bisa shrink */
+  min-height: 0;
 }
 
 .content {
@@ -114,96 +126,109 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   min-width: 0;
 }
 
-/* ── Tab nav ── */
+/* ── Tab nav ────────────────────────────────────────────────────────────────── */
 .tab-nav {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(10,10,20,0.95);
-  backdrop-filter: blur(20px);
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  background: rgba(7,7,26,0.97);
+  backdrop-filter: blur(24px);
   z-index: 50;
-  gap: 12px;
-  flex-shrink: 0; /* jangan sampai tab-nav ikut shrink */
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: 46px;
 }
 
 .logo {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   flex-shrink: 0;
 }
 
 .logo-icon {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
+  width: 24px; height: 24px;
+  border-radius: 6px;
   background: linear-gradient(135deg, var(--accent), var(--accent-pink));
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 12px;
   flex-shrink: 0;
-  line-height: 26px;
+  line-height: 24px;
   text-align: center;
+  box-shadow: 0 0 12px rgba(124,58,237,0.4);
 }
 
 .logo-text {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: -0.5px;
   white-space: nowrap;
+  background: linear-gradient(135deg, #f1f5f9, #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
+/* FIX: tabs tidak overflow, auto-hide labels saat sempit */
 .tabs {
   display: flex;
-  gap: 2px;
+  gap: 1px;
   flex: 1;
   justify-content: center;
-  overflow: visible; /* ubah dari hidden ke visible */
   flex-wrap: nowrap;
+  overflow: hidden;   /* tidak scroll, tapi cegah wrap */
+  min-width: 0;
 }
 
 .tab-btn {
-  padding: 4px 8px;
-  border-radius: 20px;
-  font-size: 10px;
+  padding: 5px 8px;
+  border-radius: 18px;
+  font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text-faint);
   transition: all 0.2s;
   white-space: nowrap;
   display: flex;
   align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .tab-btn.active {
-  background: rgba(124,58,237,0.2);
+  background: rgba(124,58,237,0.15);
+  border-color: rgba(124,58,237,0.3);
   color: var(--accent-light);
 }
 
 .tab-btn:hover:not(.active) {
-  background: rgba(255,255,255,0.05);
+  background: rgba(255,255,255,0.04);
   color: var(--text-secondary);
+}
+
+/* Label teks di dalam tab */
+.tab-label {
+  display: inline;
 }
 
 .toolbar {
   display: flex;
-  gap: 4px;
+  gap: 3px;
   flex-shrink: 0;
   align-items: center;
 }
 
 .icon-btn {
-  width: 28px;
-  height: 28px;
+  width: 28px; height: 28px;
   border-radius: 7px;
-  border: 1px solid var(--border-muted);
+  border: 1px solid rgba(255,255,255,0.06);
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text-faint);
   cursor: pointer;
   font-size: 13px;
   display: flex;
@@ -217,17 +242,65 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   border-color: var(--accent);
   color: var(--accent-light);
   background: rgba(124,58,237,0.1);
+  box-shadow: 0 0 10px rgba(124,58,237,0.2);
 }
 
-/* ── Tab content ── */
+/* ── Tab content ────────────────────────────────────────────────────────────── */
 .tab-content {
   flex: 1;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 16px 20px;
-  min-height: 0; /* KRITIS */
+  min-height: 0;
+  position: relative;
 }
 
-/* ── Selection ── */
+/* ── Settings modal ──────────────────────────────────────────────────────────── */
+.settings-content {
+  overflow-y: auto;
+  max-height: calc(100vh - 120px);
+}
+
+/* ── Library table ───────────────────────────────────────────────────────────── */
+.lib-table { width: 100%; border-collapse: collapse; }
+
+.lib-table tbody tr {
+  height: 52px;
+  border-bottom: 1px solid rgba(255,255,255,0.02);
+  transition: background 0.12s;
+}
+
+.lib-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.012); }
+.lib-table tbody tr:hover { background: rgba(124,58,237,0.07) !important; }
+.lib-table tbody tr.is-active { background: rgba(124,58,237,0.12) !important; }
+.lib-table tbody tr.is-active td { color: #c4b5fd; }
+
+/* ── Skeleton shimmer ────────────────────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position:  600px 0; }
+}
+
+.skeleton {
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--bg-muted) 25%, #2a2a42 50%, var(--bg-muted) 75%);
+  background-size: 600px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* ── Ripple ──────────────────────────────────────────────────────────────────── */
+@keyframes ripple {
+  0%   { transform: scale(0); opacity: 0.4; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+/* ── Global keyframes ───────────────────────────────────────────────────────── */
+@keyframes spin     { to { transform: rotate(360deg); } }
+@keyframes fade-in  { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+.fade-in { animation: fade-in 0.3s ease-out both; }
+
+/* ── Selection ──────────────────────────────────────────────────────────────── */
 ::selection {
   background: rgba(124,58,237,0.4);
   color: white;
@@ -236,4 +309,44 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* ── FIX: Responsive tab nav ─────────────────────────────────────────────────
+   Sembunyikan label teks saat window < 960px agar tab tidak overflow/terpotong
+   ──────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 960px) {
+  .tab-label {
+    display: none;   /* sembunyikan teks, hanya icon */
+  }
+  .tab-btn {
+    padding: 5px 7px;
+    min-width: 28px;
+    justify-content: center;
+  }
+  .logo-text {
+    display: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .tab-nav {
+    padding: 6px 8px;
+    gap: 4px;
+  }
+  .tab-btn {
+    padding: 4px 5px;
+    font-size: 14px;   /* icon lebih besar saat sangat kecil */
+  }
+  .icon-btn {
+    width: 24px; height: 24px;
+    font-size: 11px;
+  }
+  .tab-content {
+    padding: 10px 12px;
+  }
+}
+
+@media (max-height: 500px) {
+  .tab-nav { padding: 4px 10px; min-height: 38px; }
+  .tab-content { padding: 8px 12px; }
 }

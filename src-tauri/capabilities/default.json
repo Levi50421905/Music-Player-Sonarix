@@ -1,47 +1,86 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default permissions",
+  "description": "Resonance permissions — strict, includes mini player window",
   "platforms": ["linux", "macOS", "windows"],
-  "windows": ["main"],
+  "windows": ["main", "mini"],
   "permissions": [
     "core:default",
+
     "core:event:default",
     "core:event:allow-listen",
     "core:event:allow-emit",
     "core:event:allow-unlisten",
+
     "core:window:default",
     "core:window:allow-close",
     "core:window:allow-create",
     "core:window:allow-start-dragging",
     "core:window:allow-set-always-on-top",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-decorations",
+    "core:window:allow-set-skip-taskbar",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-title",
+    "core:window:allow-get-all-windows",
+
+    "core:webview:default",
+    "core:webview:allow-create-webview-window",
+    "core:webview:allow-set-webview-focus",
+
     "fs:default",
     "fs:read-all",
     "fs:read-dirs",
     "fs:read-files",
     "fs:read-meta",
-    "fs:scope",
-    "fs:scope-home-recursive",
-    "fs:scope-download-recursive",
-    "fs:scope-document-recursive",
-    "fs:scope-audio-recursive",
-    "fs:scope-desktop-recursive",
+    "fs:write-files",
+
     {
       "identifier": "fs:scope",
       "allow": [
-        { "path": "/**" },
-        { "path": "?:\\**" }
+        { "path": "$AUDIO/**" },
+        { "path": "$MUSIC/**" },
+        { "path": "$HOME/**" },
+        { "path": "$APPDATA/**" },
+        { "path": "$LOCALAPPDATA/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$DOWNLOAD/**" },
+
+        { "path": "C:\\**" },
+        { "path": "D:\\**" },
+        { "path": "E:\\**" },
+        { "path": "F:\\**" },
+        { "path": "G:\\**" },
+        { "path": "H:\\**" },
+        { "path": "I:\\**" },
+        { "path": "J:\\**" },
+
+        { "path": "/home/**" },
+        { "path": "/mnt/**" },
+        { "path": "/media/**" },
+        { "path": "/Volumes/**" }
       ]
     },
+
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",
+
     "shell:default",
     "shell:allow-open",
+
     "sql:default",
     "sql:allow-execute",
     "sql:allow-select",
     "sql:allow-load",
-    "sql:allow-close"
+    "sql:allow-close",
+
+    "notification:default",
+    "notification:allow-notify",
+    "notification:allow-request-permission",
+    "notification:allow-is-permission-granted"
   ]
 }
