@@ -12,8 +12,8 @@
  *     → Tidak pernah repeat 3 lagu terakhir dalam window
  */
 
-import type { Song } from "../lib/db";
-import { audioEngine } from "../lib/audioEngine";
+import type { Song } from "./db";
+import { audioEngine } from "./audioEngine";
 
 // ── Shuffle Pool State ────────────────────────────────────────────────────────
 // State ini hidup di memory, tidak perlu persistent

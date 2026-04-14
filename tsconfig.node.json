@@ -1,5 +1,11 @@
 {
   "compilerOptions": {
-    "types": ["vitest/globals"]
-  }
+    "composite": true,
+    "skipLibCheck": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "strict": false
+  },
+  "include": ["vite.config.ts"]
 }

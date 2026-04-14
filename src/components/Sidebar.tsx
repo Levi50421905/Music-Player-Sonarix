@@ -1,295 +1,30 @@
 /**
- * Sidebar.tsx — v4 (contrast & visibility fixes)
+ * Sidebar.tsx — v6 (Design Refresh)
  *
- * FIXES:
- *   - Artist name highlight saat isPlaying (#6b7280 → #9ca3af when playing)
- *   - Info chips: #4b5563 → #8b95a3
- *   - FormatBadge font size 9px → 11px
- *   - Track details label: #4b5563 → #8b95a3
- *   - File path text / section headers: #3f3f5a → #6b7280
- *   - "Pilih lagu untuk mulai" placeholder: #2a2a3e → #4b5563
- *   - Visualizer type buttons inactive: #3f3f5a → #6b7280
+ * PERUBAHAN vs v5:
+ *   [DESIGN] Warna teks diperbaiki — semua kontras WCAG AA
+ *   [DESIGN] Cover art section lebih clean, ambient blur diatur
+ *   [DESIGN] Track info lebih readable dengan hierarchy yang jelas
+ *   [DESIGN] Detail section pakai grid 2-kolom untuk efisiensi ruang
+ *   [DESIGN] Visualizer dengan toggle yang lebih rapi
+ *   [DESIGN] "Up Next" mini preview lebih polish
+ *   [DESIGN] Format badge konsisten dengan sistem badge baru
+ *   [DESIGN] Collapse button lebih subtle dan proper
  */
 
+import { useState, useCallback } from "react";
 import { usePlayerStore, useSettingsStore } from "../store";
 import BarVisualizer, { CircleVisualizer, WaveVisualizer } from "./Visualizer/BarVisualizer";
-import LyricsPanel  from "./Lyrics/LyricsPanel";
-import CoverArt     from "./CoverArt";
-import StarRating   from "./StarRating";
+import LyricsPanel from "./Lyrics/LyricsPanel";
+import CoverArt from "./CoverArt";
+import StarRating from "./StarRating";
+import { useLang } from "../lib/i18n";
 
 interface Props {
   onPlayPause: () => void;
   onRating:    (songId: number, stars: number) => void;
-}
-
-export default function Sidebar({ onRating }: Props) {
-  const { currentSong, isPlaying, currentTime } = usePlayerStore();
-  const { visualizerType, setVisualizerType, showLyrics, toggleLyrics } = useSettingsStore();
-
-  const song = currentSong;
-
-  return (
-    <div style={{
-      width: 340,
-      background: "#0a0a18",
-      borderRight: "1px solid rgba(255,255,255,0.04)",
-      display: "flex",
-      flexDirection: "column",
-      flexShrink: 0,
-      overflow: "hidden",
-      position: "relative",
-    }}>
-
-      {/* ── Ambient background blob ── */}
-      {song?.cover_art && (
-        <div style={{
-          position: "absolute",
-          top: -20, left: -20, right: -20,
-          height: 380,
-          backgroundImage: `url(${song.cover_art})`,
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-          filter: "blur(40px) saturate(1.4)",
-          opacity: 0.18,
-          zIndex: 0,
-          transition: "opacity 0.6s",
-          pointerEvents: "none",
-        }} />
-      )}
-      <div style={{
-        position: "absolute",
-        top: 0, left: 0, right: 0, height: 380,
-        background: "linear-gradient(to bottom, rgba(10,10,24,0.3) 0%, #0a0a18 85%)",
-        zIndex: 1,
-        pointerEvents: "none",
-      }} />
-
-      {/* ── Cover art ── */}
-      <div style={{ padding: "20px 20px 0", position: "relative", zIndex: 2 }}>
-        <div style={{
-          borderRadius: 14, overflow: "hidden",
-          transform: isPlaying ? "scale(1.015)" : "scale(1)",
-          transition: "transform 0.6s cubic-bezier(0.34,1.56,0.64,1)",
-          boxShadow: isPlaying
-            ? "0 12px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(124,58,237,0.3)"
-            : "0 8px 32px rgba(0,0,0,0.5)",
-        }}>
-          <CoverArt id={song?.id ?? 0} coverArt={song?.cover_art ?? null} size={300} />
-          {isPlaying && (
-            <div style={{
-              position: "absolute", inset: 0,
-              background: "radial-gradient(circle at 50% 50%, transparent 30%, rgba(0,0,0,0.08) 100%)",
-              animation: "slow-spin 12s linear infinite",
-            }} />
-          )}
-          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(10,10,24,0.7) 0%, transparent 50%)" }} />
-        </div>
-      </div>
-
-      {/* ── Track info ── */}
-      <div style={{ padding: "14px 20px 0", position: "relative", zIndex: 2 }}>
-        <div style={{
-          fontWeight: 700, fontSize: 15,
-          letterSpacing: "-0.3px",
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-          color: song ? "#f1f5f9" : "#4b5563",       /* FIX: was #2a2a3e when empty */
-          textShadow: isPlaying && song ? "0 0 24px rgba(167,139,250,0.5)" : "none",
-          transition: "text-shadow 0.5s",
-          lineHeight: 1.3,
-        }}>
-          {song?.title ?? "No track selected"}
-        </div>
-
-        {/* FIX: artist brighter when playing */}
-        <div style={{
-          fontSize: 12, marginTop: 3,
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-          color: isPlaying && song ? "#9ca3af" : "#6b7280",
-          transition: "color 0.4s",
-        }}>
-          {song?.artist ?? "—"}
-        </div>
-
-        <div style={{
-          fontSize: 11, marginTop: 1,
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-          color: "#6b7280",                          /* FIX: was #3f3f5a */
-        }}>
-          {song?.album ?? ""}
-        </div>
-      </div>
-
-      {/* ── Rating + format ── */}
-      <div style={{
-        padding: "10px 20px 0", position: "relative", zIndex: 2,
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-      }}>
-        {song ? (
-          <StarRating stars={song.stars ?? 0} onChange={s => onRating(song.id, s)} />
-        ) : <div style={{ height: 18 }} />}
-        {song && <FormatBadge format={song.format} bitrate={song.bitrate} />}
-      </div>
-
-      {/* ── Visualizer ── */}
-      <div style={{ padding: "14px 20px 0", position: "relative", zIndex: 2 }}>
-        <div style={{ display: "flex", gap: 4, justifyContent: "flex-end", marginBottom: 8 }}>
-          {(["bar", "wave", "circle"] as const).map(type => (
-            <button key={type} onClick={() => setVisualizerType(type)} style={{
-              width: 24, height: 24, borderRadius: 6, fontSize: 12,
-              border: "1px solid",
-              background: visualizerType === type ? "rgba(124,58,237,0.25)" : "transparent",
-              borderColor: visualizerType === type ? "rgba(124,58,237,0.6)" : "rgba(255,255,255,0.08)",
-              color: visualizerType === type ? "#a78bfa" : "#6b7280",   /* FIX: was #3f3f5a */
-              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-              transition: "all 0.15s",
-            }}>
-              {type === "bar" ? "▌" : type === "wave" ? "∿" : "◎"}
-            </button>
-          ))}
-        </div>
-        {visualizerType === "bar"    && <BarVisualizer isPlaying={isPlaying} height={44} />}
-        {visualizerType === "wave"   && <WaveVisualizer isPlaying={isPlaying} />}
-        {visualizerType === "circle" && <div style={{ display: "flex", justifyContent: "center" }}><CircleVisualizer isPlaying={isPlaying} /></div>}
-      </div>
-
-      {/* ── Info chips ── */}
-      {song && (
-        <div style={{ padding: "10px 20px 0", display: "flex", gap: 5, flexWrap: "wrap", position: "relative", zIndex: 2 }}>
-          {[song.genre, song.year?.toString(), `${song.play_count ?? 0} plays`].filter(Boolean).map(chip => (
-            <span key={chip} style={{
-              fontSize: 11,              /* FIX: was 10px */
-              padding: "2px 8px", borderRadius: 20,
-              background: "rgba(255,255,255,0.04)",
-              color: "#8b95a3",          /* FIX: was #4b5563 */
-              border: "1px solid rgba(255,255,255,0.06)",
-            }}>{chip}</span>
-          ))}
-        </div>
-      )}
-
-      {/* ── Lyrics toggle ── */}
-      <div style={{ padding: "10px 20px 0", position: "relative", zIndex: 2 }}>
-        <button onClick={toggleLyrics} style={{
-          width: "100%", padding: "7px", borderRadius: 8, fontSize: 12,
-          border: "1px solid", cursor: "pointer", fontFamily: "inherit",
-          background: showLyrics ? "rgba(124,58,237,0.12)" : "transparent",
-          borderColor: showLyrics ? "rgba(124,58,237,0.4)" : "rgba(255,255,255,0.06)",
-          color: showLyrics ? "#a78bfa" : "#6b7280",
-          transition: "all 0.2s",
-        }}>
-          {showLyrics ? "🎵 Hide Lyrics" : "🎵 Show Lyrics"}
-        </button>
-      </div>
-
-      {/* ── Lyrics panel ── */}
-      {showLyrics && song ? (
-        <div style={{
-          flex: 1,
-          minHeight: 0,
-          overflow: "hidden",
-          marginTop: 8,
-          position: "relative",
-          zIndex: 2,
-        }}>
-          <LyricsPanel
-            songPath={song.path}
-            currentTime={currentTime}
-            songTitle={song.title}
-            songArtist={song.artist}
-          />
-        </div>
-      ) : (
-        <div style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: "auto",
-          overflowX: "hidden",
-          padding: "12px 20px 16px",
-          position: "relative",
-          zIndex: 2,
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          scrollbarWidth: "thin",
-          scrollbarColor: "rgba(124,58,237,0.3) transparent",
-        }}>
-          {song ? (
-            <>
-              <p style={{
-                fontSize: 10,
-                color: "#6b7280",          /* FIX: was #3f3f5a */
-                textTransform: "uppercase",
-                letterSpacing: "0.1em", fontWeight: 700, marginBottom: 4,
-              }}>Track Details</p>
-
-              {[
-                { label: "Duration",    value: formatDuration(song.duration) },
-                { label: "Format",      value: `${song.format ?? "—"} · ${song.bitrate >= 1000 ? `${(song.bitrate / 1000).toFixed(0)}k` : `${song.bitrate || "?"}kbps`}` },
-                { label: "BPM",         value: song.bpm ? `${Math.round(song.bpm)} BPM` : "—" },
-                { label: "Genre",       value: song.genre || "—" },
-                { label: "Year",        value: song.year?.toString() ?? "—" },
-                { label: "Play Count",  value: `${song.play_count ?? 0} plays` },
-                { label: "Date Added",  value: song.date_added ? new Date(song.date_added).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }) : "—" },
-              ].map(({ label, value }) => (
-                <div key={label} style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                  padding: "5px 0",
-                  borderBottom: "1px solid rgba(255,255,255,0.03)",
-                }}>
-                  <span style={{ fontSize: 11, color: "#8b95a3" }}>{label}</span>   {/* FIX: was #4b5563 */}
-                  <span style={{
-                    fontSize: 11, color: "#9ca3af",
-                    fontFamily: label === "Duration" || label === "BPM" || label === "Play Count"
-                      ? "Space Mono, monospace" : "inherit",
-                    maxWidth: 160, textAlign: "right",
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  }}>{value}</span>
-                </div>
-              ))}
-
-              <div style={{ marginTop: 4 }}>
-                <p style={{
-                  fontSize: 10,
-                  color: "#6b7280",        /* FIX: was #3f3f5a */
-                  textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, marginBottom: 4,
-                }}>
-                  File Path
-                </p>
-                <p style={{
-                  fontSize: 10,
-                  color: "#6b7280",        /* FIX: was #3f3f5a */
-                  fontFamily: "Space Mono, monospace",
-                  wordBreak: "break-all",
-                  lineHeight: 1.6,
-                  background: "rgba(255,255,255,0.02)",
-                  border: "1px solid rgba(255,255,255,0.04)",
-                  borderRadius: 6,
-                  padding: "6px 8px",
-                }}>
-                  {song.path}
-                </p>
-              </div>
-            </>
-          ) : (
-            <div style={{
-              display: "flex", flexDirection: "column",
-              alignItems: "center", justifyContent: "center",
-              height: "100%", gap: 6,
-            }}>
-              <span style={{ fontSize: 28, opacity: 0.2 }}>♪</span>
-              <p style={{ fontSize: 12, color: "#4b5563", textAlign: "center" }}>  {/* FIX: was #2a2a3e */}
-                Pilih lagu untuk mulai
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      <style>{`
-        @keyframes slow-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      `}</style>
-    </div>
-  );
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 function formatDuration(sec: number): string {
@@ -300,20 +35,472 @@ function formatDuration(sec: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function FormatBadge({ format, bitrate }: { format: string; bitrate: number }) {
-  const isLossless = ["FLAC", "WAV", "ALAC", "APE"].includes((format ?? "").toUpperCase());
-  const br = bitrate >= 1000 ? `${(bitrate / 1000).toFixed(1)}k` : `${bitrate || "?"}`;
+function formatBitrate(bitrate: number): string {
+  if (!bitrate) return "? kbps";
+  if (bitrate >= 1000) return `${Math.round(bitrate / 10) / 100} Mbps`;
+  return `${bitrate} kbps`;
+}
+
+export default function Sidebar({ onRating, collapsed = false, onToggleCollapse }: Props) {
+  const { currentSong, isPlaying, currentTime, getUpNext } = usePlayerStore((s) => ({
+    currentSong: s.currentSong,
+    isPlaying: s.isPlaying,
+    currentTime: s.currentTime,
+    getUpNext: s.getUpNext,
+  }));
+  const { visualizerType, setVisualizerType, showLyrics, toggleLyrics } = useSettingsStore();
+  const { t } = useLang();
+  const [coverExpanded, setCoverExpanded] = useState(false);
+
+  const song     = currentSong;
+  const upNext   = getUpNext ? getUpNext(1) : [];
+  const nextSong = upNext[0]?.song ?? null;
+
+  const isLossless = ["FLAC", "WAV", "ALAC", "APE"].includes((song?.format ?? "").toUpperCase());
+
+  // ── Collapsed state ──────────────────────────────────────────────────────────
+  if (collapsed) {
+    return (
+      <div style={{
+        width: 34,
+        background: "var(--bg-surface)",
+        borderRight: "1px solid var(--border-subtle)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        paddingTop: 10,
+        flexShrink: 0,
+        transition: "width 0.2s ease",
+      }}>
+        <button
+          onClick={onToggleCollapse}
+          title="Expand sidebar"
+          style={{
+            width: 26, height: 26, borderRadius: "var(--radius-md)",
+            background: "transparent",
+            border: "1px solid var(--border)",
+            color: "var(--text-muted)", cursor: "pointer", fontSize: 14,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.color = "var(--accent-light)";
+            e.currentTarget.style.borderColor = "var(--accent-border)";
+            e.currentTarget.style.background = "var(--accent-dim)";
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.color = "var(--text-muted)";
+            e.currentTarget.style.borderColor = "var(--border)";
+            e.currentTarget.style.background = "transparent";
+          }}
+        >
+          ›
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <span style={{
-      fontSize: 11,           /* FIX: was 9px */
-      fontFamily: "Space Mono, monospace",
-      padding: "3px 7px", borderRadius: 5,
-      background: isLossless ? "rgba(16,185,129,0.1)" : "rgba(99,102,241,0.1)",
-      border: `1px solid ${isLossless ? "rgba(16,185,129,0.3)" : "rgba(99,102,241,0.3)"}`,
-      color: isLossless ? "#34D399" : "#818CF8",
-      letterSpacing: "0.05em",
-    }}>
-      {format} {br}
-    </span>
+    <>
+      {/* Fullscreen cover overlay */}
+      {coverExpanded && song?.cover_art && (
+        <div
+          onClick={() => setCoverExpanded(false)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 999,
+            background: "rgba(0,0,0,0.9)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: "pointer",
+          }}
+        >
+          <img
+            src={song.cover_art}
+            alt={song.title}
+            style={{
+              maxWidth: "78vw", maxHeight: "78vh",
+              borderRadius: 16,
+              boxShadow: "0 32px 80px rgba(0,0,0,0.8)",
+            }}
+          />
+          <div style={{
+            position: "absolute", bottom: 28, left: "50%", transform: "translateX(-50%)",
+            fontSize: 12, color: "rgba(255,255,255,0.35)",
+          }}>
+            Click to close
+          </div>
+        </div>
+      )}
+
+      <div style={{
+        width: 288,
+        background: "var(--bg-surface)",
+        borderRight: "1px solid var(--border-subtle)",
+        display: "flex",
+        flexDirection: "column",
+        flexShrink: 0,
+        overflow: "hidden",
+        position: "relative",
+        transition: "width 0.2s ease",
+      }}>
+        {/* Collapse button */}
+        <button
+          onClick={onToggleCollapse}
+          title="Collapse sidebar"
+          style={{
+            position: "absolute", top: 10, right: 8, zIndex: 10,
+            width: 22, height: 22, borderRadius: "var(--radius-sm)",
+            background: "transparent",
+            border: "1px solid var(--border)",
+            color: "var(--text-faint)", cursor: "pointer", fontSize: 11,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.color = "var(--accent-light)";
+            e.currentTarget.style.borderColor = "var(--accent-border)";
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.color = "var(--text-faint)";
+            e.currentTarget.style.borderColor = "var(--border)";
+          }}
+        >
+          ‹
+        </button>
+
+        {/* Ambient background */}
+        {song?.cover_art && (
+          <div style={{
+            position: "absolute",
+            top: -20, left: -20, right: -20,
+            height: 280,
+            backgroundImage: `url(${song.cover_art})`,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            filter: "blur(48px) saturate(1.2)",
+            opacity: 0.14,
+            zIndex: 0,
+            transition: "opacity 0.8s",
+            pointerEvents: "none",
+          }} />
+        )}
+        <div style={{
+          position: "absolute",
+          top: 0, left: 0, right: 0, height: 280,
+          background: "linear-gradient(to bottom, rgba(11,11,31,0.2) 0%, var(--bg-surface) 88%)",
+          zIndex: 1,
+          pointerEvents: "none",
+        }} />
+
+        {/* ── Cover Art ── */}
+        <div style={{ padding: "16px 16px 0", position: "relative", zIndex: 2 }}>
+          <div
+            onClick={() => song?.cover_art && setCoverExpanded(true)}
+            style={{
+              borderRadius: 12, overflow: "hidden",
+              transform: isPlaying ? "scale(1.012)" : "scale(1)",
+              transition: "transform 0.5s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.4s",
+              boxShadow: isPlaying
+                ? "0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(124,58,237,0.2)"
+                : "0 4px 20px rgba(0,0,0,0.4)",
+              cursor: song?.cover_art ? "zoom-in" : "default",
+              position: "relative",
+            }}
+          >
+            <CoverArt id={song?.id ?? 0} coverArt={song?.cover_art ?? null} size={256} />
+
+            {/* Subtle gradient overlay at bottom */}
+            <div style={{
+              position: "absolute", inset: 0,
+              background: "linear-gradient(to top, rgba(11,11,31,0.5) 0%, transparent 45%)",
+            }} />
+
+            {/* Zoom hint */}
+            {song?.cover_art && (
+              <div style={{
+                position: "absolute", bottom: 7, right: 7,
+                fontSize: 10, color: "rgba(255,255,255,0.5)",
+                background: "rgba(0,0,0,0.4)", borderRadius: 4,
+                padding: "2px 5px", backdropFilter: "blur(4px)",
+              }}>
+                ⤢
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Track info ── */}
+        <div style={{ padding: "12px 16px 0", position: "relative", zIndex: 2 }}>
+          {/* Title */}
+          <div
+            style={{
+              fontWeight: 700, fontSize: 14,
+              letterSpacing: "-0.3px",
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              color: song ? "var(--text-primary)" : "var(--text-faint)",
+              lineHeight: 1.3,
+            }}
+            title={song?.title ?? ""}
+          >
+            {song?.title ?? "No track selected"}
+          </div>
+
+          {/* Artist */}
+          <div style={{
+            fontSize: 12, marginTop: 2,
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            color: "var(--text-secondary)",
+          }}>
+            {song?.artist ?? "—"}
+          </div>
+
+          {/* Album */}
+          {song?.album && (
+            <div style={{
+              fontSize: 11, marginTop: 1,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              color: "var(--text-muted)",
+            }}>
+              {song.album}
+            </div>
+          )}
+        </div>
+
+        {/* ── Rating + format badge ── */}
+        <div style={{
+          padding: "8px 16px 0", position: "relative", zIndex: 2,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          {song ? (
+            <StarRating stars={song.stars ?? 0} onChange={s => onRating(song.id, s)} />
+          ) : <div style={{ height: 18 }} />}
+
+          {song && (
+            <span className={`badge ${isLossless ? "badge-lossless" : "badge-lossy"}`}>
+              {song.format}
+            </span>
+          )}
+        </div>
+
+        {/* ── Visualizer ── */}
+        <div style={{ padding: "10px 16px 0", position: "relative", zIndex: 2 }}>
+          <div style={{ display: "flex", gap: 3, justifyContent: "flex-end", marginBottom: 6 }}>
+            {(["bar", "wave", "circle"] as const).map(type => (
+              <button
+                key={type}
+                onClick={() => setVisualizerType(type)}
+                title={`${type} visualizer`}
+                style={{
+                  width: 26, height: 22, borderRadius: "var(--radius-sm)", fontSize: 11,
+                  border: "1px solid",
+                  background: visualizerType === type ? "var(--accent-dim)" : "transparent",
+                  borderColor: visualizerType === type ? "var(--accent-border)" : "var(--border)",
+                  color: visualizerType === type ? "var(--accent-light)" : "var(--text-faint)",
+                  cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+                onMouseEnter={e => { if (visualizerType !== type) e.currentTarget.style.borderColor = "var(--border-medium)"; }}
+                onMouseLeave={e => { if (visualizerType !== type) e.currentTarget.style.borderColor = "var(--border)"; }}
+              >
+                {type === "bar" ? "▌" : type === "wave" ? "∿" : "◎"}
+              </button>
+            ))}
+          </div>
+          {visualizerType === "bar" && <BarVisualizer isPlaying={isPlaying} height={38} />}
+          {visualizerType === "wave" && <WaveVisualizer isPlaying={isPlaying} />}
+          {visualizerType === "circle" && (
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <CircleVisualizer isPlaying={isPlaying} />
+            </div>
+          )}
+        </div>
+
+        {/* ── Info chips ── */}
+        {song && (
+          <div style={{
+            padding: "7px 16px 0", display: "flex", gap: 4,
+            flexWrap: "wrap", position: "relative", zIndex: 2,
+          }}>
+            {[
+              song.genre && song.genre !== "Unknown" ? song.genre : null,
+              song.year ? String(song.year) : null,
+              `${song.play_count ?? 0} plays`,
+            ].filter(Boolean).map(chip => (
+              <span key={chip} style={{
+                fontSize: 11, padding: "2px 7px", borderRadius: 20,
+                background: "var(--bg-muted)",
+                color: "var(--text-muted)",
+                border: "1px solid var(--border)",
+              }}>
+                {chip}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* ── Lyrics toggle ── */}
+        <div style={{ padding: "8px 16px 0", position: "relative", zIndex: 2 }}>
+          <button
+            onClick={toggleLyrics}
+            style={{
+              width: "100%", padding: "6px", borderRadius: "var(--radius-md)",
+              fontSize: 12, border: "1px solid", cursor: "pointer", fontFamily: "inherit",
+              background: showLyrics ? "var(--accent-dim)" : "transparent",
+              borderColor: showLyrics ? "var(--accent-border)" : "var(--border)",
+              color: showLyrics ? "var(--accent-light)" : "var(--text-muted)",
+            }}
+            onMouseEnter={e => { if (!showLyrics) e.currentTarget.style.borderColor = "var(--border-medium)"; }}
+            onMouseLeave={e => { if (!showLyrics) e.currentTarget.style.borderColor = "var(--border)"; }}
+          >
+            {showLyrics ? "♪ Hide Lyrics" : "♪ Show Lyrics"}
+          </button>
+        </div>
+
+        {/* ── Scrollable lower section ── */}
+        {showLyrics && song ? (
+          <div style={{ flex: 1, minHeight: 0, overflow: "hidden", marginTop: 8, position: "relative", zIndex: 2 }}>
+            <LyricsPanel
+              songPath={song.path}
+              currentTime={currentTime}
+              songTitle={song.title}
+              songArtist={song.artist}
+            />
+          </div>
+        ) : (
+          <div style={{
+            flex: 1, minHeight: 0,
+            overflowY: "auto", overflowX: "hidden",
+            padding: "10px 16px 12px",
+            position: "relative", zIndex: 2,
+            display: "flex", flexDirection: "column", gap: 0,
+            scrollbarWidth: "thin",
+            scrollbarColor: "rgba(124,58,237,0.25) transparent",
+          }}>
+            {song ? (
+              <>
+                {/* Track details header */}
+                <p style={{
+                  fontSize: 10, color: "var(--text-faint)",
+                  textTransform: "uppercase", letterSpacing: "0.1em",
+                  fontWeight: 700, marginBottom: 8,
+                }}>
+                  Track details
+                </p>
+
+                {/* Details grid */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "auto 1fr",
+                  gap: "0",
+                  borderRadius: "var(--radius-md)",
+                  overflow: "hidden",
+                  border: "1px solid var(--border-subtle)",
+                }}>
+                  {[
+                    { label: "Duration", value: formatDuration(song.duration) },
+                    { label: "Format",   value: `${song.format ?? "—"} · ${formatBitrate(song.bitrate)}` },
+                    { label: "BPM",      value: song.bpm ? `${Math.round(song.bpm)} BPM` : "Unknown" },
+                    { label: "Genre",    value: song.genre || "Unknown" },
+                    { label: "Year",     value: song.year?.toString() ?? "—" },
+                    { label: "Plays",    value: `${song.play_count ?? 0}` },
+                    { label: "Added",    value: song.date_added
+                        ? new Date(song.date_added).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+                        : "—" },
+                  ].map(({ label, value }, idx) => (
+                    <>
+                      <div key={`label-${label}`} style={{
+                        padding: "6px 10px",
+                        fontSize: 11, color: "var(--text-muted)",
+                        background: idx % 2 === 0 ? "var(--bg-overlay)" : "transparent",
+                        borderBottom: idx < 6 ? "1px solid var(--border-subtle)" : "none",
+                        fontWeight: 500,
+                        whiteSpace: "nowrap",
+                      }}>
+                        {label}
+                      </div>
+                      <div key={`val-${label}`} style={{
+                        padding: "6px 10px",
+                        fontSize: 11, color: "var(--text-secondary)",
+                        background: idx % 2 === 0 ? "var(--bg-overlay)" : "transparent",
+                        borderBottom: idx < 6 ? "1px solid var(--border-subtle)" : "none",
+                        fontFamily: ["Duration","BPM","Plays","Format"].includes(label) ? "'Space Mono', monospace" : "inherit",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        {value}
+                      </div>
+                    </>
+                  ))}
+                </div>
+
+                {/* Up Next preview */}
+                {nextSong && (
+                  <div style={{ marginTop: 12 }}>
+                    <p style={{
+                      fontSize: 10, color: "var(--text-faint)",
+                      textTransform: "uppercase", letterSpacing: "0.1em",
+                      fontWeight: 700, marginBottom: 6,
+                    }}>
+                      Up next
+                    </p>
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "7px 9px", borderRadius: "var(--radius-md)",
+                      background: "var(--bg-overlay)",
+                      border: "1px solid var(--border)",
+                    }}>
+                      <CoverArt id={nextSong.id} coverArt={nextSong.cover_art} size={30} />
+                      <div style={{ flex: 1, overflow: "hidden" }}>
+                        <div style={{
+                          fontSize: 12, fontWeight: 500,
+                          color: "var(--text-secondary)",
+                          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                        }}>
+                          {nextSong.title}
+                        </div>
+                        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{nextSong.artist}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* File path */}
+                <div style={{ marginTop: 10 }}>
+                  <p style={{
+                    fontSize: 10, color: "var(--text-faint)",
+                    textTransform: "uppercase", letterSpacing: "0.1em",
+                    fontWeight: 700, marginBottom: 5,
+                  }}>
+                    File path
+                  </p>
+                  <p style={{
+                    fontSize: 10, color: "var(--text-muted)",
+                    fontFamily: "'Space Mono', monospace",
+                    wordBreak: "break-all", lineHeight: 1.6,
+                    background: "var(--bg-overlay)",
+                    border: "1px solid var(--border-subtle)",
+                    borderRadius: "var(--radius-sm)", padding: "6px 8px",
+                    userSelect: "text",
+                  }}>
+                    {song.path}
+                  </p>
+                </div>
+              </>
+            ) : (
+              <div style={{
+                display: "flex", flexDirection: "column",
+                alignItems: "center", justifyContent: "center",
+                height: "100%", gap: 8,
+              }}>
+                <span style={{ fontSize: 28, opacity: 0.15 }}>♪</span>
+                <p style={{ fontSize: 12, color: "var(--text-faint)", textAlign: "center" }}>
+                  Select a track to begin
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        <style>{`
+          @keyframes slow-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        `}</style>
+      </div>
+    </>
   );
 }

@@ -1,78 +1,73 @@
 /**
- * KeyboardCheatsheet.tsx — Shortcut overlay saat tekan "?"
+ * KeyboardCheatsheet.tsx — v2 (Design Refresh)
  *
- * Tekan ? → overlay muncul dengan semua keyboard shortcuts.
- * Tekan Escape atau klik backdrop → tutup.
+ * PERUBAHAN vs v1:
+ *   [DESIGN] Semua warna pakai CSS variable
+ *   [DESIGN] Card group lebih clean
+ *   [DESIGN] Kbd element lebih readable
  */
 
 import { useEffect, useState } from "react";
 
 interface ShortcutGroup {
   group: string;
-  icon: string;
   items: { keys: string[]; action: string }[];
 }
 
 const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     group: "Playback",
-    icon: "▶",
     items: [
-      { keys: ["Space"],        action: "Play / Pause" },
-      { keys: ["→"],            action: "Maju 5 detik" },
-      { keys: ["←"],            action: "Mundur 5 detik" },
-      { keys: ["Ctrl", "→"],    action: "Maju 30 detik" },
-      { keys: ["Ctrl", "←"],    action: "Mundur 30 detik" },
-      { keys: ["Shift", "→"],   action: "Lagu berikutnya" },
-      { keys: ["Shift", "←"],   action: "Lagu sebelumnya" },
+      { keys: ["Space"],       action: "Play / Pause" },
+      { keys: ["→"],           action: "Seek +5s" },
+      { keys: ["←"],           action: "Seek -5s" },
+      { keys: ["Ctrl","→"],    action: "Seek +30s" },
+      { keys: ["Ctrl","←"],    action: "Seek -30s" },
+      { keys: ["Shift","→"],   action: "Next track" },
+      { keys: ["Shift","←"],   action: "Previous track" },
     ],
   },
   {
     group: "Volume",
-    icon: "🔊",
     items: [
-      { keys: ["↑"],            action: "Volume naik 5%" },
-      { keys: ["↓"],            action: "Volume turun 5%" },
-      { keys: ["M"],            action: "Mute / Unmute" },
+      { keys: ["↑"],  action: "Volume +5%" },
+      { keys: ["↓"],  action: "Volume -5%" },
+      { keys: ["M"],  action: "Mute / Unmute" },
     ],
   },
   {
-    group: "Mode",
-    icon: "⇄",
+    group: "Modes",
     items: [
-      { keys: ["S"],            action: "Toggle shuffle" },
-      { keys: ["R"],            action: "Cycle repeat (off → all → one)" },
+      { keys: ["S"],  action: "Toggle shuffle" },
+      { keys: ["R"],  action: "Cycle repeat" },
     ],
   },
   {
-    group: "UI",
-    icon: "🖥",
+    group: "Interface",
     items: [
-      { keys: ["F"],            action: "Fokus ke search" },
-      { keys: ["Ctrl", "M"],    action: "Buka / tutup mini player" },
-      { keys: ["Ctrl", "L"],    action: "Toggle lyrics panel" },
-      { keys: ["Ctrl", ","],    action: "Buka settings" },
-      { keys: ["?"],            action: "Tampilkan shortcut ini" },
+      { keys: ["F"],        action: "Focus search" },
+      { keys: ["Ctrl","M"], action: "Mini player" },
+      { keys: ["Ctrl","L"], action: "Toggle lyrics" },
+      { keys: ["Ctrl",","], action: "Open settings" },
+      { keys: ["?"],        action: "This cheatsheet" },
     ],
   },
   {
     group: "Rating",
-    icon: "⭐",
     items: [
-      { keys: ["1"],            action: "Rating 1 bintang (toggle)" },
-      { keys: ["2"],            action: "Rating 2 bintang (toggle)" },
-      { keys: ["3"],            action: "Rating 3 bintang (toggle)" },
-      { keys: ["4"],            action: "Rating 4 bintang (toggle)" },
-      { keys: ["5"],            action: "Rating 5 bintang (toggle)" },
+      { keys: ["1"], action: "1 star (toggle)" },
+      { keys: ["2"], action: "2 stars (toggle)" },
+      { keys: ["3"], action: "3 stars (toggle)" },
+      { keys: ["4"], action: "4 stars (toggle)" },
+      { keys: ["5"], action: "5 stars (toggle)" },
     ],
   },
   {
-    group: "OS Media Keys",
-    icon: "⌨",
+    group: "Media keys",
     items: [
-      { keys: ["⏯"],           action: "Play / Pause" },
-      { keys: ["⏭"],           action: "Lagu berikutnya" },
-      { keys: ["⏮"],           action: "Lagu sebelumnya" },
+      { keys: ["⏯"], action: "Play / Pause" },
+      { keys: ["⏭"], action: "Next track" },
+      { keys: ["⏮"], action: "Previous track" },
     ],
   },
 ];
@@ -86,12 +81,8 @@ export default function KeyboardCheatsheet({ open, onClose }: Props) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    if (open) {
-      setVisible(true);
-    } else {
-      const t = setTimeout(() => setVisible(false), 250);
-      return () => clearTimeout(t);
-    }
+    if (open) { setVisible(true); }
+    else { const t = setTimeout(() => setVisible(false), 220); return () => clearTimeout(t); }
   }, [open]);
 
   if (!visible && !open) return null;
@@ -100,117 +91,79 @@ export default function KeyboardCheatsheet({ open, onClose }: Props) {
     <div
       onClick={onClose}
       style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 500,
-        background: "rgba(0,0,0,0.75)",
+        position: "fixed", inset: 0, zIndex: 500,
+        background: "rgba(0,0,0,0.7)",
         backdropFilter: "blur(10px)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
+        display: "flex", alignItems: "center", justifyContent: "center",
         opacity: open ? 1 : 0,
-        transition: "opacity 0.25s ease",
+        transition: "opacity 0.22s ease",
       }}
     >
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: "#0d0d1f",
-          border: "1px solid rgba(124,58,237,0.3)",
-          borderRadius: 16,
-          padding: "28px 32px",
-          width: 680,
-          maxWidth: "95vw",
-          maxHeight: "88vh",
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-medium)",
+          borderRadius: "var(--radius-xl, 16px)",
+          padding: "24px 28px",
+          width: 660,
+          maxWidth: "94vw",
+          maxHeight: "86vh",
           overflowY: "auto",
-          boxShadow: "0 32px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(124,58,237,0.1)",
-          transform: open ? "translateY(0) scale(1)" : "translateY(16px) scale(0.97)",
-          transition: "transform 0.25s cubic-bezier(0.34,1.56,0.64,1)",
+          boxShadow: "0 32px 80px rgba(0,0,0,0.8)",
+          transform: open ? "translateY(0) scale(1)" : "translateY(12px) scale(0.97)",
+          transition: "transform 0.22s cubic-bezier(0.34,1.56,0.64,1)",
         }}
       >
         {/* Header */}
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 24,
-        }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
           <div>
-            <h2 style={{
-              fontWeight: 700,
-              fontSize: 18,
-              letterSpacing: "-0.4px",
-              color: "#f1f5f9",
-            }}>
-              Keyboard Shortcuts
+            <h2 style={{ fontWeight: 700, fontSize: 16, color: "var(--text-primary)", letterSpacing: "-0.3px" }}>
+              Keyboard shortcuts
             </h2>
-            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 3 }}>
-              Tekan <Kbd>?</Kbd> kapan saja untuk membuka overlay ini · <Kbd>Esc</Kbd> untuk tutup
+            <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>
+              Press <Kbd>?</Kbd> to open · <Kbd>Esc</Kbd> to close
             </p>
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              width: 30, height: 30, borderRadius: 8,
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.08)",
-              color: "#9ca3af", cursor: "pointer", fontSize: 16,
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}
+          <button onClick={onClose} style={{
+            width: 28, height: 28, borderRadius: "var(--radius-md, 8px)",
+            background: "transparent", border: "1px solid var(--border)",
+            color: "var(--text-muted)", cursor: "pointer", fontSize: 15,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--border-medium)"; e.currentTarget.style.color = "var(--text-primary)"; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.color = "var(--text-muted)"; }}
           >✕</button>
         </div>
 
-        {/* Grid groups */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 20,
-        }}>
+        {/* Groups grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           {SHORTCUT_GROUPS.map(group => (
             <div key={group.group} style={{
-              background: "rgba(255,255,255,0.02)",
-              border: "1px solid rgba(255,255,255,0.05)",
-              borderRadius: 10,
-              padding: "14px 16px",
+              background: "var(--bg-overlay)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-lg, 12px)",
+              padding: "12px 14px",
             }}>
-              {/* Group header */}
               <div style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-                marginBottom: 12,
-                paddingBottom: 8,
-                borderBottom: "1px solid rgba(255,255,255,0.05)",
+                fontSize: 10, fontWeight: 700,
+                color: "var(--accent-light, #a78bfa)",
+                textTransform: "uppercase", letterSpacing: "0.1em",
+                marginBottom: 10, paddingBottom: 8,
+                borderBottom: "1px solid var(--border-subtle)",
               }}>
-                <span style={{ fontSize: 14 }}>{group.icon}</span>
-                <span style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: "#a78bfa",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.1em",
-                }}>{group.group}</span>
+                {group.group}
               </div>
-
-              {/* Items */}
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {group.items.map(item => (
-                  <div
-                    key={item.action}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 8,
-                    }}
-                  >
-                    <span style={{ fontSize: 12, color: "#9ca3af" }}>{item.action}</span>
-                    <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+                  <div key={item.action} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{item.action}</span>
+                    <div style={{ display: "flex", gap: 3, flexShrink: 0, alignItems: "center" }}>
                       {item.keys.map((k, i) => (
-                        <span key={k}>
+                        <span key={k} style={{ display: "flex", alignItems: "center", gap: 2 }}>
                           <Kbd>{k}</Kbd>
                           {i < item.keys.length - 1 && (
-                            <span style={{ fontSize: 9, color: "#4b5563", margin: "0 1px" }}>+</span>
+                            <span style={{ fontSize: 9, color: "var(--text-faint)" }}>+</span>
                           )}
                         </span>
                       ))}
@@ -222,16 +175,12 @@ export default function KeyboardCheatsheet({ open, onClose }: Props) {
           ))}
         </div>
 
-        {/* Footer */}
         <div style={{
-          marginTop: 20,
-          paddingTop: 16,
-          borderTop: "1px solid rgba(255,255,255,0.05)",
-          fontSize: 11,
-          color: "#4b5563",
-          textAlign: "center",
+          marginTop: 16, paddingTop: 14,
+          borderTop: "1px solid var(--border-subtle)",
+          fontSize: 11, color: "var(--text-faint)", textAlign: "center",
         }}>
-          Shortcuts tidak aktif saat focus di input / textarea
+          Shortcuts inactive when focused in an input or textarea
         </div>
       </div>
     </div>
@@ -241,18 +190,13 @@ export default function KeyboardCheatsheet({ open, onClose }: Props) {
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
     <kbd style={{
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: "2px 6px",
-      borderRadius: 5,
-      fontSize: 10,
-      fontFamily: "Space Mono, monospace",
-      background: "#1a1a2e",
-      border: "1px solid #3f3f5a",
-      color: "#a78bfa",
-      minWidth: 20,
-      lineHeight: 1.4,
+      display: "inline-flex", alignItems: "center", justifyContent: "center",
+      padding: "2px 6px", borderRadius: 5,
+      fontSize: 10, fontFamily: "'Space Mono', monospace",
+      background: "var(--bg-muted)",
+      border: "1px solid var(--border-medium)",
+      color: "var(--accent-light, #a78bfa)",
+      minWidth: 20, lineHeight: 1.4,
     }}>
       {children}
     </kbd>

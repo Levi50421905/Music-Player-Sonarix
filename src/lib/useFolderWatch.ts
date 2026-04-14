@@ -15,9 +15,9 @@
 import { useEffect, useRef, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useSettingsStore, useLibraryStore } from "../../store";
+import { useSettingsStore, useLibraryStore } from "../store";
 import { getDb, upsertSong, getAllSongs } from "./db";
-import { toastInfo, toastSuccess } from "../../components/Notification/ToastSystem";
+import { toastInfo, toastSuccess } from "../components/Notification/ToastSystem";
 
 // Re-use parser logic dari scanner — import fungsi internal
 // Kita perlu parseFile yang sudah ada di scanner.ts
@@ -61,9 +61,8 @@ async function parseSingleFile(filePath: string) {
   const blob  = new Blob([bytes]);
 
   const meta = await musicMetadata.parseBlob(blob, {
-    mimeType: getMimeType(ext),
-    skipCovers: false,
-  });
+  skipCovers: false,
+} as any);
 
   const { common, format } = meta;
   const fileName = filePath.replace(/\\/g, "/").split("/").pop()?.replace(/\.[^.]+$/, "") ?? "Unknown";
@@ -80,20 +79,22 @@ async function parseSingleFile(filePath: string) {
   }
 
   return {
-    path:       normalizedPath,
-    title:      common.title ?? fileName,
-    artist:     common.artist ?? common.albumartist ?? "Unknown Artist",
-    album:      common.album ?? "Unknown Album",
-    genre:      common.genre?.[0] ?? "Unknown",
-    year:       common.year ?? null,
-    duration:   format.duration ?? 0,
-    bitrate:    format.bitrate ? Math.round(format.bitrate / 1000) : 0,
-    format:     ext.toUpperCase(),
-    cover_art:  coverArt,
-    bpm:        common.bpm ?? null,
-    stars:      undefined,
-    play_count: undefined,
-  };
+  path:       normalizedPath,
+  title:      common.title ?? fileName,
+  artist:     common.artist ?? common.albumartist ?? "Unknown Artist",
+  album:      common.album ?? "Unknown Album",
+  genre:      common.genre?.[0] ?? "Unknown",
+  year:       common.year ?? null,
+  duration:   format.duration ?? 0,
+  bitrate:    format.bitrate ? Math.round(format.bitrate / 1000) : 0,
+  format:     ext.toUpperCase(),
+  cover_art:  coverArt,
+  bpm:        common.bpm ?? null,
+  file_size:  null,
+  loved:      0,
+  stars:      undefined,
+  play_count: undefined,
+};
 }
 
 export function useFolderWatch() {

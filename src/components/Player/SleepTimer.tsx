@@ -1,12 +1,11 @@
 /**
- * SleepTimer.tsx — v3
+ * SleepTimer.tsx — v5 (Design Fix)
  *
- * FIX:
- *   - useSleepTimer hook bisa digunakan di App.tsx (lifted state)
- *   - SleepTimerButton menerima timer state dari luar via props
- *   - Countdown terlihat jelas di button
- *   - Fade out 30 detik sebelum pause benar-benar terjadi
- *   - Semua state di-export agar bisa di-connect ke App.tsx
+ * PERUBAHAN vs v4:
+ *   [FIX] Dropdown position: fixed → absolute dengan overflow-clip yang benar
+ *   [FIX] Preset buttons lebih compact (2 kolom grid)
+ *   [FIX] Semua warna sudah pakai CSS variable
+ *   [FIX] Dropdown sekarang tidak terpotong di tepi layar
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -37,10 +36,7 @@ export function useSleepTimer() {
 
   const clear = useCallback(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
-    // Restore volume jika sedang fading
-    if (timer.fading) {
-      audioEngine.setVolume(originalVolume.current);
-    }
+    if (timer.fading) audioEngine.setVolume(originalVolume.current);
     setTimer({ endsAt: null, remaining: 0, fading: false, pauseAfterSong: false });
     pauseAfterRef.current = false;
   }, [timer.fading]);
@@ -51,31 +47,25 @@ export function useSleepTimer() {
 
     const endsAt = Date.now() + minutes * 60_000;
     setTimer({ endsAt, remaining: minutes * 60, fading: false, pauseAfterSong: false });
-    toastInfo(`⏱️ Sleep timer: musik pause dalam ${minutes} menit`);
+    toastInfo(`Sleep timer: pauses in ${minutes} min`);
 
     intervalRef.current = setInterval(() => {
       setTimer(prev => {
         if (!prev.endsAt) return prev;
-
         const remaining = Math.max(0, Math.round((prev.endsAt - Date.now()) / 1000));
-
         if (remaining <= 0) {
-          // PAUSE musik
           audioEngine.pause();
           usePlayerStore.getState().setIsPlaying(false);
           audioEngine.setVolume(originalVolume.current);
           if (intervalRef.current) clearInterval(intervalRef.current);
-          toastInfo("Sleep timer: musik di-pause 🌙");
+          toastInfo("Sleep timer: music paused");
           return { endsAt: null, remaining: 0, fading: false, pauseAfterSong: false };
         }
-
-        // Fade out
         if (remaining <= FADE_SECONDS) {
           const fadePct = remaining / FADE_SECONDS;
           audioEngine.setVolume(Math.max(0, Math.round(originalVolume.current * fadePct)));
           return { ...prev, remaining, fading: true };
         }
-
         return { ...prev, remaining };
       });
     }, 1000);
@@ -84,7 +74,7 @@ export function useSleepTimer() {
   const startPauseAfterSong = useCallback(() => {
     setTimer(prev => ({ ...prev, pauseAfterSong: true, endsAt: null }));
     pauseAfterRef.current = true;
-    toastInfo("⏸ Musik akan pause setelah lagu ini selesai");
+    toastInfo("Music will pause after this song");
   }, []);
 
   const shouldPauseAfterSong = useCallback(() => {
@@ -107,8 +97,8 @@ export function useSleepTimer() {
 function formatRemaining(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
-  if (m === 0) return `${s}d`;
-  return s === 0 ? `${m}m` : `${m}m ${s}d`;
+  if (m === 0) return `${s}s`;
+  return s === 0 ? `${m}m` : `${m}m ${s}s`;
 }
 
 // ── UI Component ───────────────────────────────────────────────────────────────
@@ -123,148 +113,244 @@ export default function SleepTimerButton({
   timer, onStart, onClear, onPauseAfterSong,
 }: SleepTimerButtonProps) {
   const [open, setOpen] = useState(false);
-
+  const containerRef = useRef<HTMLDivElement>(null);
   const isActive = timer.endsAt !== null || timer.pauseAfterSong;
+  const isFading = timer.fading;
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
 
   return (
-    <div style={{ position: "relative" }}>
+    <div ref={containerRef} style={{ position: "relative" }}>
       <button
         onClick={() => setOpen(o => !o)}
         title="Sleep Timer"
         style={{
-          background: isActive ? "rgba(124,58,237,0.2)" : "transparent",
-          border: `1px solid ${isActive ? "#7C3AED" : "rgba(255,255,255,0.06)"}`,
-          borderRadius: 7,
+          height: 30,
+          padding: "0 9px",
+          borderRadius: "var(--radius-md)",
+          border: `1px solid ${isActive
+            ? isFading
+              ? "var(--warning-border)"
+              : "rgba(245,158,11,0.35)"
+            : "var(--border)"}`,
+          background: isActive
+            ? isFading
+              ? "var(--warning-dim)"
+              : "rgba(245,158,11,0.1)"
+            : "transparent",
           cursor: "pointer",
-          color: isActive ? "#a78bfa" : "#6b7280",
-          padding: "4px 8px",
-          fontSize: 11,
+          color: isActive ? "var(--warning)" : "var(--text-muted)",
+          fontSize: 12,
           fontFamily: "inherit",
           display: "flex",
           alignItems: "center",
           gap: 5,
-          height: 28,
-          transition: "all 0.2s",
           flexShrink: 0,
+          boxShadow: isActive && isFading
+            ? "0 0 10px rgba(245,158,11,0.25)"
+            : isActive ? "0 0 6px rgba(245,158,11,0.15)" : "none",
+          animation: isFading ? "sleep-pulse 2s ease-in-out infinite" : "none",
+          transition: "all 0.15s",
+        }}
+        onMouseEnter={e => {
+          if (!isActive) {
+            e.currentTarget.style.borderColor = "var(--border-medium)";
+            e.currentTarget.style.color = "var(--text-secondary)";
+          }
+        }}
+        onMouseLeave={e => {
+          if (!isActive) {
+            e.currentTarget.style.borderColor = "var(--border)";
+            e.currentTarget.style.color = "var(--text-muted)";
+          }
         }}
       >
-        <span style={{ fontSize: 13 }}>🌙</span>
+        {/* Moon SVG icon */}
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 10A6 6 0 016 2a7 7 0 100 12 6 6 0 008-4z"/>
+        </svg>
         {timer.endsAt ? (
-          <span style={{ fontFamily: "Space Mono, monospace", fontSize: 10 }}>
+          <span style={{
+            fontFamily: "'Space Mono', monospace",
+            fontSize: 11,
+            fontWeight: 700,
+            color: isFading ? "var(--warning)" : "var(--warning)",
+          }}>
             {formatRemaining(timer.remaining)}
-            {timer.fading && " 🔉"}
+            {isFading && " ↓"}
           </span>
         ) : timer.pauseAfterSong ? (
-          <span style={{ fontSize: 10 }}>setelah lagu</span>
-        ) : (
-          <span style={{ fontSize: 10 }}>Sleep</span>
-        )}
+          <span style={{ fontSize: 11 }}>after</span>
+        ) : null}
       </button>
 
-      {/* Dropdown */}
+      {/* Dropdown panel — position absolute, bukan fixed */}
       {open && (
-        <>
-          <div
-            style={{ position: "fixed", inset: 0, zIndex: 98 }}
-            onClick={() => setOpen(false)}
-          />
-          <div style={{
-            position: "absolute",
-            bottom: "calc(100% + 8px)",
-            right: 0,
-            background: "#1a1a2e",
-            border: "1px solid #2a2a3e",
-            borderRadius: 12,
-            padding: 14,
-            width: 230,
-            boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
-            zIndex: 99,
+        <div style={{
+          position: "absolute",
+          bottom: "calc(100% + 8px)",
+          right: 0,
+          background: "var(--bg-overlay)",
+          border: "1px solid var(--border-medium)",
+          borderRadius: "var(--radius-xl)",
+          padding: 14,
+          width: 210,
+          boxShadow: "var(--shadow-lg)",
+          zIndex: 200,
+          /* Pastikan tidak terpotong */
+          overflowY: "auto",
+          maxHeight: "70vh",
+        }}>
+          <p style={{
+            fontSize: 12, fontWeight: 600,
+            color: "var(--text-primary)",
+            marginBottom: 10,
+            display: "flex", alignItems: "center", gap: 6,
           }}>
-            <p style={{ fontSize: 12, color: "#a78bfa", marginBottom: 12, fontWeight: 700 }}>
-              🌙 Sleep Timer
-            </p>
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 10A6 6 0 016 2a7 7 0 100 12 6 6 0 008-4z"/>
+            </svg>
+            Sleep Timer
+          </p>
 
-            {/* Active timer display */}
-            {timer.endsAt && (
-              <div style={{
-                background: "rgba(124,58,237,0.1)",
-                border: "1px solid rgba(124,58,237,0.3)",
-                borderRadius: 8, padding: "8px 10px",
-                marginBottom: 12, textAlign: "center",
+          {/* Active countdown */}
+          {timer.endsAt && (
+            <div style={{
+              background: "var(--warning-dim)",
+              border: "1px solid var(--warning-border)",
+              borderRadius: "var(--radius-md)", padding: "10px",
+              marginBottom: 10, textAlign: "center",
+            }}>
+              <p style={{
+                fontSize: 22, fontWeight: 700,
+                color: "var(--warning)",
+                fontFamily: "'Space Mono', monospace",
+                lineHeight: 1,
               }}>
-                <p style={{ fontSize: 20, fontWeight: 700, color: "#a78bfa", fontFamily: "monospace" }}>
-                  {formatRemaining(timer.remaining)}
-                </p>
-                <p style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
-                  {timer.fading ? "🔉 Sedang fade out..." : "sebelum pause"}
-                </p>
-              </div>
-            )}
-
-            {/* Presets */}
-            <p style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              Pause setelah
-            </p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
-              {PRESETS.map(min => (
-                <button
-                  key={min}
-                  onClick={() => { onStart(min); setOpen(false); }}
-                  style={{
-                    padding: "5px 10px", borderRadius: 6, fontSize: 11,
-                    border: "1px solid #3f3f5a", background: "transparent",
-                    color: "#9ca3af", cursor: "pointer", fontFamily: "inherit",
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.borderColor = "#7C3AED";
-                    e.currentTarget.style.color = "#a78bfa";
-                    e.currentTarget.style.background = "rgba(124,58,237,0.1)";
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.borderColor = "#3f3f5a";
-                    e.currentTarget.style.color = "#9ca3af";
-                    e.currentTarget.style.background = "transparent";
-                  }}
-                >
-                  {min}m
-                </button>
-              ))}
+                {formatRemaining(timer.remaining)}
+              </p>
+              <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                {timer.fading ? "Volume fading…" : "until pause"}
+              </p>
             </div>
+          )}
 
-            {/* Pause after song */}
-            <button
-              onClick={() => { onPauseAfterSong(); setOpen(false); }}
-              style={{
-                width: "100%", padding: "8px", borderRadius: 8, fontSize: 11,
-                background: timer.pauseAfterSong ? "rgba(124,58,237,0.2)" : "rgba(255,255,255,0.03)",
-                border: `1px solid ${timer.pauseAfterSong ? "#7C3AED" : "#2a2a3e"}`,
-                color: timer.pauseAfterSong ? "#a78bfa" : "#9ca3af",
-                cursor: "pointer", fontFamily: "inherit", marginBottom: 8,
-              }}
-            >
-              ⏸ Pause setelah lagu ini
-            </button>
+          {/* Presets label */}
+          <p style={{
+            fontSize: 10, color: "var(--text-faint)",
+            marginBottom: 7,
+            textTransform: "uppercase", letterSpacing: "0.08em",
+            fontWeight: 700,
+          }}>
+            Stop after
+          </p>
 
-            {/* Cancel */}
-            {isActive && (
+          {/* Presets — 2 kolom grid agar lebih compact */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 5, marginBottom: 10,
+          }}>
+            {PRESETS.map(min => (
               <button
-                onClick={() => { onClear(); setOpen(false); }}
+                key={min}
+                onClick={() => { onStart(min); setOpen(false); }}
                 style={{
-                  width: "100%", padding: "7px", borderRadius: 6, fontSize: 11,
-                  background: "rgba(239,68,68,0.15)", border: "1px solid #EF4444",
-                  color: "#f87171", cursor: "pointer", fontFamily: "inherit",
+                  padding: "6px 8px",
+                  borderRadius: "var(--radius-sm)", fontSize: 12,
+                  border: "1px solid var(--border-medium)",
+                  background: "transparent",
+                  color: "var(--text-secondary)",
+                  cursor: "pointer", fontFamily: "inherit",
+                  textAlign: "center",
+                  transition: "all 0.15s",
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.borderColor = "var(--warning-border)";
+                  e.currentTarget.style.color = "var(--warning)";
+                  e.currentTarget.style.background = "var(--warning-dim)";
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.borderColor = "var(--border-medium)";
+                  e.currentTarget.style.color = "var(--text-secondary)";
+                  e.currentTarget.style.background = "transparent";
                 }}
               >
-                Batalkan{timer.remaining > 0 ? ` (${formatRemaining(timer.remaining)} lagi)` : ""}
+                {min}m
               </button>
-            )}
-
-            <p style={{ fontSize: 10, color: "#4b5563", marginTop: 8, lineHeight: 1.5 }}>
-              Volume akan fade out {FADE_SECONDS} detik sebelum pause.
-            </p>
+            ))}
           </div>
-        </>
+
+          {/* Pause after song */}
+          <button
+            onClick={() => { onPauseAfterSong(); setOpen(false); }}
+            style={{
+              width: "100%", padding: "7px 10px",
+              borderRadius: "var(--radius-md)", fontSize: 12,
+              background: timer.pauseAfterSong ? "var(--accent-dim)" : "transparent",
+              border: `1px solid ${timer.pauseAfterSong ? "var(--accent-border)" : "var(--border-medium)"}`,
+              color: timer.pauseAfterSong ? "var(--accent-light)" : "var(--text-secondary)",
+              cursor: "pointer", fontFamily: "inherit", marginBottom: 7,
+              textAlign: "left", transition: "all 0.15s",
+            }}
+            onMouseEnter={e => {
+              if (!timer.pauseAfterSong) {
+                e.currentTarget.style.borderColor = "var(--accent-border)";
+                e.currentTarget.style.color = "var(--accent-light)";
+              }
+            }}
+            onMouseLeave={e => {
+              if (!timer.pauseAfterSong) {
+                e.currentTarget.style.borderColor = "var(--border-medium)";
+                e.currentTarget.style.color = "var(--text-secondary)";
+              }
+            }}
+          >
+            Pause after this song
+          </button>
+
+          {/* Cancel */}
+          {isActive && (
+            <button
+              onClick={() => { onClear(); setOpen(false); }}
+              style={{
+                width: "100%", padding: "6px 10px",
+                borderRadius: "var(--radius-md)", fontSize: 12,
+                background: "var(--danger-dim)",
+                border: "1px solid var(--danger-border)",
+                color: "#f87171", cursor: "pointer", fontFamily: "inherit",
+                textAlign: "left", transition: "all 0.15s",
+              }}
+            >
+              Cancel timer
+            </button>
+          )}
+
+          <p style={{
+            fontSize: 10, color: "var(--text-faint)",
+            marginTop: 8, lineHeight: 1.5,
+          }}>
+            Volume fades in last {FADE_SECONDS}s
+          </p>
+        </div>
       )}
+
+      <style>{`
+        @keyframes sleep-pulse {
+          0%, 100% { box-shadow: 0 0 6px rgba(245,158,11,0.15); }
+          50% { box-shadow: 0 0 14px rgba(245,158,11,0.35); }
+        }
+      `}</style>
     </div>
   );
 }

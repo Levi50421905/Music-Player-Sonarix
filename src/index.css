@@ -1,11 +1,12 @@
 /**
- * index.css — v3
+ * index.css — v7 (Responsive Nav Fix + Settings Fix)
  *
- * FIX:
- *   - Tab nav responsive: label tersembunyi saat window kecil
- *   - Tab nav tidak overflow / terpotong
- *   - Tab button hanya tampilkan icon saat sempit
- *   - PlayerBar height variable konsisten
+ * PERUBAHAN vs v6:
+ *   [FIX] Tab nav: scroll horizontal jika tidak cukup lebar, tab tidak terpotong
+ *   [FIX] Logo selalu tampil di semua ukuran layar
+ *   [FIX] Settings panel: ukuran konsisten, tidak overflow, max-width fixed
+ *   [FIX] Responsive breakpoints lebih halus
+ *   [NEW] .tab-nav menggunakan overflow-x auto agar tidak terpotong
  */
 
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Space+Mono:wght@400;700&display=swap');
@@ -18,27 +19,55 @@
 
 :root {
   --bg-base:      #07071a;
-  --bg-surface:   #0b0b1e;
-  --bg-overlay:   #13132a;
-  --bg-muted:     #1e1e38;
-  --text-primary: #e2e8f0;
-  --text-secondary:#9ca3af;
-  --text-muted:   #6b7280;
-  --text-faint:   #4b5563;
-  --accent:       #7C3AED;
-  --accent-light: #a78bfa;
-  --accent-pink:  #EC4899;
-  --success:      #10B981;
-  --border:       #13132a;
-  --border-muted: #1e1e38;
+  --bg-surface:   #0b0b1f;
+  --bg-overlay:   #111128;
+  --bg-muted:     #1a1a35;
+  --bg-subtle:    #22223f;
+
+  --text-primary:   #eaeaf5;
+  --text-secondary: #b0b0c8;
+  --text-muted:     #7a7a96;
+  --text-faint:     #52527a;
+
+  --accent:         #7C3AED;
+  --accent-light:   #a78bfa;
+  --accent-dim:     rgba(124,58,237,0.15);
+  --accent-border:  rgba(124,58,237,0.35);
+  --accent-pink:    #EC4899;
+  --accent-pink-dim: rgba(236,72,153,0.15);
+  --accent-pink-border: rgba(236,72,153,0.35);
+
+  --success:        #10B981;
+  --success-dim:    rgba(16,185,129,0.12);
+  --success-border: rgba(16,185,129,0.3);
+
+  --danger:         #EF4444;
+  --danger-dim:     rgba(239,68,68,0.12);
+  --danger-border:  rgba(239,68,68,0.3);
+
+  --warning:        #F59E0B;
+  --warning-dim:    rgba(245,158,11,0.12);
+  --warning-border: rgba(245,158,11,0.3);
+
+  --info:           #3B82F6;
+  --info-dim:       rgba(59,130,246,0.12);
+  --info-border:    rgba(59,130,246,0.3);
+
+  --border:         rgba(255,255,255,0.06);
+  --border-subtle:  rgba(255,255,255,0.04);
+  --border-medium:  rgba(255,255,255,0.10);
 
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
   --shadow-md: 0 4px 16px rgba(0,0,0,0.5);
   --shadow-lg: 0 12px 40px rgba(0,0,0,0.7);
-  --player-bar-height: 124px;
+
+  --player-bar-height: 128px;
+  --radius-sm:  6px;
+  --radius-md:  8px;
+  --radius-lg:  12px;
+  --radius-xl:  16px;
 }
 
-/* ── Reset ──────────────────────────────────────────────────────────────────── */
 html { height: 100%; overflow: hidden; }
 
 body {
@@ -60,11 +89,11 @@ body {
 }
 
 /* ── Scrollbar ──────────────────────────────────────────────────────────────── */
-::-webkit-scrollbar       { width: 4px; height: 4px; }
+::-webkit-scrollbar       { width: 3px; height: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: rgba(124,58,237,0.25);
-  border-radius: 4px;
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(124,58,237,0.5); }
 
@@ -83,18 +112,21 @@ input[type="range"]::-webkit-slider-runnable-track {
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 11px; height: 11px;
+  width: 12px; height: 12px;
   border-radius: 50%;
   background: var(--accent);
-  margin-top: -4px;
-  transition: transform 0.15s cubic-bezier(0.34,1.56,0.64,1);
+  margin-top: -4.5px;
+  transition: transform 0.15s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.15s;
 }
-input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.25); }
+input[type="range"]:hover::-webkit-slider-thumb {
+  transform: scale(1.3);
+  box-shadow: 0 0 0 3px rgba(124,58,237,0.2);
+}
 
 /* ── Button reset ───────────────────────────────────────────────────────────── */
 button {
   font-family: inherit;
-  transition: opacity 0.15s, transform 0.15s cubic-bezier(0.34,1.56,0.64,1);
+  transition: opacity 0.15s, transform 0.15s cubic-bezier(0.34,1.56,0.64,1), background 0.15s, border-color 0.15s, color 0.15s;
 }
 button:active  { transform: scale(0.93) !important; }
 button:disabled { opacity: 0.35; cursor: not-allowed; }
@@ -126,39 +158,43 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   min-width: 0;
 }
 
-/* ── Tab nav ────────────────────────────────────────────────────────────────── */
+/* ── Tab nav — FIXED: no overflow clip, scroll if needed ───────────────────── */
 .tab-nav {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 14px;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border-subtle);
   background: rgba(7,7,26,0.97);
   backdrop-filter: blur(24px);
   z-index: 50;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
-  min-height: 46px;
+  height: 46px;
+  /* Allow content to be visible; don't clip */
+  overflow: visible;
+  min-width: 0;
 }
 
+/* ── Logo ─────────────────────────────────────────── */
 .logo {
   display: flex;
   align-items: center;
   gap: 7px;
   flex-shrink: 0;
+  text-decoration: none;
+  margin-right: 4px;
 }
 
 .logo-icon {
   width: 24px; height: 24px;
-  border-radius: 6px;
+  border-radius: 7px;
   background: linear-gradient(135deg, var(--accent), var(--accent-pink));
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 12px;
   flex-shrink: 0;
-  line-height: 24px;
-  text-align: center;
+  line-height: 1;
   box-shadow: 0 0 12px rgba(124,58,237,0.4);
 }
 
@@ -167,82 +203,164 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   font-size: 13px;
   letter-spacing: -0.5px;
   white-space: nowrap;
-  background: linear-gradient(135deg, #f1f5f9, #a78bfa);
+  background: linear-gradient(135deg, #f1f5f9, var(--accent-light));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
-/* FIX: tabs tidak overflow, auto-hide labels saat sempit */
+/* ── Primary tabs — scrollable container ───────────────────────────────────── */
 .tabs {
   display: flex;
   gap: 1px;
   flex: 1;
-  justify-content: center;
-  flex-wrap: nowrap;
-  overflow: hidden;   /* tidak scroll, tapi cegah wrap */
+  /* Allow horizontal scroll if tabs don't fit */
+  overflow-x: auto;
+  overflow-y: visible;
+  scrollbar-width: none; /* hide scrollbar */
   min-width: 0;
+  /* Scroll snap for cleaner feel */
+  scroll-snap-type: x proximity;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab-btn {
-  padding: 5px 8px;
-  border-radius: 18px;
+  padding: 5px 10px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-faint);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0; /* Never shrink individual tabs */
+  height: 30px;
+  transition: all 0.15s;
+  letter-spacing: -0.1px;
+  scroll-snap-align: start;
+}
+
+.tab-btn svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.tab-btn.active {
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+  color: var(--accent-light);
+}
+
+.tab-btn.active svg {
+  opacity: 1;
+}
+
+.tab-btn:hover:not(.active) {
+  background: rgba(255,255,255,0.05);
+  color: var(--text-secondary);
+}
+
+.tab-btn:hover:not(.active) svg {
+  opacity: 1;
+}
+
+.tab-label { display: inline; }
+
+/* ── Secondary tabs (Queue/EQ/Playlists) ────────────────────────────────────── */
+.secondary-tabs {
+  display: flex;
+  gap: 1px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.secondary-tab-btn {
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-faint);
-  transition: all 0.2s;
   white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+  height: 26px;
+  transition: all 0.15s;
 }
 
-.tab-btn.active {
-  background: rgba(124,58,237,0.15);
-  border-color: rgba(124,58,237,0.3);
+.secondary-tab-btn svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.secondary-tab-btn.active {
+  background: var(--accent-dim);
+  border-color: rgba(124,58,237,0.25);
   color: var(--accent-light);
 }
 
-.tab-btn:hover:not(.active) {
+.secondary-tab-btn:hover:not(.active) {
   background: rgba(255,255,255,0.04);
   color: var(--text-secondary);
 }
 
-/* Label teks di dalam tab */
-.tab-label {
-  display: inline;
+.secondary-tab-label { display: inline; }
+
+/* ── Divider ─────────────────────────────────────────── */
+.nav-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  flex-shrink: 0;
+  margin: 0 2px;
 }
 
+/* ── Toolbar — always right-aligned, never shrinks ─────────────────────────── */
 .toolbar {
   display: flex;
-  gap: 3px;
+  gap: 2px;
   flex-shrink: 0;
   align-items: center;
+  margin-left: auto;
 }
 
 .icon-btn {
   width: 28px; height: 28px;
-  border-radius: 7px;
-  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
   background: transparent;
-  color: var(--text-faint);
+  color: var(--text-muted);
   cursor: pointer;
   font-size: 13px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
   flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.icon-btn svg {
+  width: 13px;
+  height: 13px;
 }
 
 .icon-btn:hover {
-  border-color: var(--accent);
+  border-color: var(--accent-border);
   color: var(--accent-light);
-  background: rgba(124,58,237,0.1);
-  box-shadow: 0 0 10px rgba(124,58,237,0.2);
+  background: var(--accent-dim);
 }
 
 /* ── Tab content ────────────────────────────────────────────────────────────── */
@@ -250,30 +368,142 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px 20px;
+  padding: 18px 22px;
   min-height: 0;
   position: relative;
 }
 
-/* ── Settings modal ──────────────────────────────────────────────────────────── */
-.settings-content {
+/* ── Settings modal — FIXED sizing ──────────────────────────────────────────── */
+.settings-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0,0,0,0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+}
+
+.settings-modal {
+  width: min(760px, calc(100vw - 32px));
+  height: min(88vh, 680px);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-xl);
+  display: flex;
+  overflow: hidden;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.7);
+}
+
+.settings-sidebar {
+  width: 180px;
+  min-width: 180px;
+  background: var(--bg-base);
+  border-right: 1px solid var(--border-subtle);
+  padding: 14px 10px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   overflow-y: auto;
-  max-height: calc(100vh - 120px);
+}
+
+.settings-content-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.settings-content-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 20px;
 }
 
 /* ── Library table ───────────────────────────────────────────────────────────── */
 .lib-table { width: 100%; border-collapse: collapse; }
 
-.lib-table tbody tr {
-  height: 52px;
-  border-bottom: 1px solid rgba(255,255,255,0.02);
-  transition: background 0.12s;
+.lib-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-surface);
+  z-index: 5;
 }
 
-.lib-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.012); }
-.lib-table tbody tr:hover { background: rgba(124,58,237,0.07) !important; }
-.lib-table tbody tr.is-active { background: rgba(124,58,237,0.12) !important; }
-.lib-table tbody tr.is-active td { color: #c4b5fd; }
+.lib-table tbody tr {
+  height: 52px;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background 0.1s;
+}
+
+.lib-table tbody tr:hover {
+  background: rgba(124,58,237,0.08) !important;
+}
+
+.lib-table tbody tr.is-active {
+  background: rgba(124,58,237,0.12) !important;
+  border-left: 2px solid var(--accent);
+}
+
+.lib-table tbody tr.is-active td {
+  color: #c4b5fd;
+}
+
+/* ── Card component ──────────────────────────────────── */
+.card {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+}
+
+.card:hover {
+  border-color: var(--border-medium);
+}
+
+.setting-group {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+/* ── Badge ───────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  font-family: 'Space Mono', monospace;
+}
+
+.badge-lossless {
+  background: rgba(16,185,129,0.12);
+  border: 1px solid rgba(16,185,129,0.3);
+  color: #34D399;
+}
+
+.badge-lossy {
+  background: rgba(99,102,241,0.12);
+  border: 1px solid rgba(99,102,241,0.3);
+  color: #818CF8;
+}
+
+.badge-new {
+  background: var(--success);
+  color: white;
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
 
 /* ── Skeleton shimmer ────────────────────────────────────────────────────────── */
 @keyframes shimmer {
@@ -283,70 +513,167 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .skeleton {
   border-radius: 4px;
-  background: linear-gradient(90deg, var(--bg-muted) 25%, #2a2a42 50%, var(--bg-muted) 75%);
+  background: linear-gradient(90deg, var(--bg-muted) 25%, var(--bg-subtle) 50%, var(--bg-muted) 75%);
   background-size: 600px 100%;
   animation: shimmer 1.4s ease-in-out infinite;
-}
-
-/* ── Ripple ──────────────────────────────────────────────────────────────────── */
-@keyframes ripple {
-  0%   { transform: scale(0); opacity: 0.4; }
-  100% { transform: scale(2.5); opacity: 0; }
 }
 
 /* ── Global keyframes ───────────────────────────────────────────────────────── */
 @keyframes spin     { to { transform: rotate(360deg); } }
 @keyframes fade-in  { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pulse    { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
 
 .fade-in { animation: fade-in 0.3s ease-out both; }
 
-/* ── Selection ──────────────────────────────────────────────────────────────── */
 ::selection {
-  background: rgba(124,58,237,0.4);
+  background: rgba(124,58,237,0.35);
   color: white;
 }
 
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
-/* ── FIX: Responsive tab nav ─────────────────────────────────────────────────
-   Sembunyikan label teks saat window < 960px agar tab tidak overflow/terpotong
-   ──────────────────────────────────────────────────────────────────────────── */
-@media (max-width: 960px) {
-  .tab-label {
-    display: none;   /* sembunyikan teks, hanya icon */
-  }
-  .tab-btn {
-    padding: 5px 7px;
-    min-width: 28px;
-    justify-content: center;
-  }
-  .logo-text {
-    display: none;
-  }
+/* ── Toggle component ────────────────────────────────── */
+.toggle-track {
+  position: relative;
+  width: 36px; height: 20px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-medium);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  flex-shrink: 0;
 }
 
-@media (max-width: 700px) {
-  .tab-nav {
-    padding: 6px 8px;
-    gap: 4px;
-  }
-  .tab-btn {
-    padding: 4px 5px;
-    font-size: 14px;   /* icon lebih besar saat sangat kecil */
-  }
-  .icon-btn {
-    width: 24px; height: 24px;
-    font-size: 11px;
-  }
-  .tab-content {
-    padding: 10px 12px;
-  }
+.toggle-track.on {
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
-@media (max-height: 500px) {
-  .tab-nav { padding: 4px 10px; min-height: 38px; }
-  .tab-content { padding: 8px 12px; }
+.toggle-thumb {
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s cubic-bezier(0.34,1.56,0.64,1);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.toggle-track.on .toggle-thumb {
+  transform: translateX(16px);
+}
+
+/* ── Context menu ────────────────────────────────────── */
+.ctx-menu {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  padding: 4px;
+  min-width: 210px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.03);
+  backdrop-filter: blur(12px);
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: background 0.1s, color 0.1s;
+}
+
+.ctx-item:hover {
+  background: rgba(255,255,255,0.05);
+  color: var(--text-primary);
+}
+
+.ctx-item.danger {
+  color: #f87171;
+}
+
+.ctx-item.danger:hover {
+  background: var(--danger-dim);
+}
+
+.ctx-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+/* ── Toast ───────────────────────────────────────────── */
+.toast-container {
+  position: fixed;
+  bottom: 140px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────────── */
+
+/* Medium: hide text labels on primary tabs, keep icons */
+@media (max-width: 1100px) {
+  .tab-label { display: none; }
+  .tab-btn { padding: 5px 7px; gap: 0; }
+  .secondary-tab-label { display: none; }
+  .secondary-tab-btn { padding: 4px 6px; }
+}
+
+/* Small: also hide logo text */
+@media (max-width: 860px) {
+  .logo-text { display: none; }
+  .logo { margin-right: 2px; }
+  .tab-nav { padding: 0 6px; gap: 3px; }
+  .tab-btn { padding: 4px 6px; }
+  .icon-btn { width: 26px; height: 26px; }
+  .tab-content { padding: 12px 14px; }
+}
+
+/* Very small: compact toolbar */
+@media (max-width: 680px) {
+  .nav-divider { display: none; }
+  .icon-btn svg { width: 12px; height: 12px; }
+}
+
+@media (max-height: 520px) {
+  .tab-nav { height: 40px; }
+  .tab-content { padding: 10px 14px; }
+}
+
+/* ── Utility ─────────────────────────────────────────── */
+.truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mono {
+  font-family: 'Space Mono', monospace;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  border: 0;
 }

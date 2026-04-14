@@ -1,5 +1,10 @@
 /**
- * db.ts — SQLite Database Layer (updated with delete functions)
+ * db.ts — SQLite Database Layer
+ * TAMBAHAN vs sebelumnya:
+ *   [NEW] reorderPlaylistSongs — update position setelah drag & drop
+ *   [NEW] kolom file_size + loved di tabel songs
+ *   [NEW] ALTER TABLE migration untuk DB yang sudah ada
+ *   [NEW] toggleLoved, getLovedSongs
  */
 
 import Database from "@tauri-apps/plugin-sql";
@@ -28,6 +33,8 @@ async function migrate(db: Database) {
       format      TEXT,
       cover_art   TEXT,
       bpm         REAL,
+      file_size   INTEGER,
+      loved       INTEGER NOT NULL DEFAULT 0,
       date_added  DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -68,6 +75,16 @@ async function migrate(db: Database) {
     CREATE INDEX IF NOT EXISTS idx_songs_artist      ON songs(artist);
     CREATE INDEX IF NOT EXISTS idx_songs_album       ON songs(album);
   `);
+
+  // Migrasi kolom baru untuk DB yang sudah ada
+  // (ALTER TABLE IF NOT EXISTS tidak didukung SQLite, pakai try/catch per kolom)
+  const migrations = [
+    "ALTER TABLE songs ADD COLUMN file_size INTEGER",
+    "ALTER TABLE songs ADD COLUMN loved INTEGER NOT NULL DEFAULT 0",
+  ];
+  for (const sql of migrations) {
+    try { await db.execute(sql); } catch { /* kolom sudah ada */ }
+  }
 }
 
 // ── Song types ────────────────────────────────────────────────────────────────
@@ -85,6 +102,8 @@ export interface Song {
   format: string;
   cover_art: string | null;
   bpm: number | null;
+  file_size: number | null;   // [NEW] ukuran file dalam bytes
+  loved: number;              // [NEW] 0 = tidak, 1 = loved/favorit
   date_added: string;
   stars?: number;
   play_count?: number;
@@ -99,15 +118,16 @@ export interface PlayRecord {
 
 export async function upsertSong(db: Database, song: Omit<Song, "id" | "date_added">) {
   await db.execute(
-    `INSERT INTO songs (path, title, artist, album, genre, year, duration, bitrate, format, cover_art, bpm)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    `INSERT INTO songs (path, title, artist, album, genre, year, duration, bitrate, format, cover_art, bpm, file_size)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      ON CONFLICT(path) DO UPDATE SET
        title=excluded.title, artist=excluded.artist, album=excluded.album,
        genre=excluded.genre, year=excluded.year, duration=excluded.duration,
        bitrate=excluded.bitrate, format=excluded.format,
-       cover_art=excluded.cover_art, bpm=excluded.bpm`,
+       cover_art=excluded.cover_art, bpm=excluded.bpm, file_size=excluded.file_size`,
     [song.path, song.title, song.artist, song.album, song.genre,
-     song.year, song.duration, song.bitrate, song.format, song.cover_art, song.bpm]
+     song.year, song.duration, song.bitrate, song.format, song.cover_art,
+     song.bpm, song.file_size ?? null]
   );
 }
 
@@ -124,12 +144,10 @@ export async function getAllSongs(db: Database): Promise<Song[]> {
   `);
 }
 
-/** Hapus lagu dari library (juga hapus ratings & history via CASCADE) */
 export async function deleteSong(db: Database, songId: number) {
   await db.execute(`DELETE FROM songs WHERE id = $1`, [songId]);
 }
 
-/** Hapus multiple lagu sekaligus */
 export async function deleteSongs(db: Database, songIds: number[]) {
   if (songIds.length === 0) return;
   const placeholders = songIds.map((_, i) => `$${i + 1}`).join(",");
@@ -161,6 +179,31 @@ export async function setRating(db: Database, songId: number, stars: number) {
       [songId, stars]
     );
   }
+}
+
+// ── Loved ─────────────────────────────────────────────────────────────────────
+
+/** Toggle loved status lagu. loved=1 berarti favorit. Returns nilai baru (0 atau 1). */
+export async function toggleLoved(db: Database, songId: number): Promise<number> {
+  const rows = await db.select<{ loved: number }[]>(
+    "SELECT loved FROM songs WHERE id = $1", [songId]
+  );
+  const current = rows[0]?.loved ?? 0;
+  const next = current === 1 ? 0 : 1;
+  await db.execute("UPDATE songs SET loved = $1 WHERE id = $2", [next, songId]);
+  return next;
+}
+
+/** Ambil semua lagu yang loved=1. */
+export async function getLovedSongs(db: Database): Promise<Song[]> {
+  return await db.select<Song[]>(`
+    SELECT s.*, r.stars, COUNT(ph.id) AS play_count
+    FROM songs s
+    LEFT JOIN ratings r ON r.song_id = s.id
+    LEFT JOIN play_history ph ON ph.song_id = s.id
+    WHERE s.loved = 1
+    GROUP BY s.id ORDER BY s.title
+  `);
 }
 
 // ── Play History ──────────────────────────────────────────────────────────────
@@ -208,7 +251,6 @@ export async function addToPlaylist(db: Database, playlistId: number, songId: nu
   );
 }
 
-/** Hapus lagu dari playlist */
 export async function removeFromPlaylist(db: Database, playlistId: number, songId: number) {
   await db.execute(
     `DELETE FROM playlist_songs WHERE playlist_id = $1 AND song_id = $2`,
@@ -226,6 +268,24 @@ export async function getPlaylistSongs(db: Database, playlistId: number): Promis
     WHERE ps.playlist_id = $1
     GROUP BY s.id ORDER BY ps.position
   `, [playlistId]);
+}
+
+/**
+ * Simpan urutan baru playlist ke DB setelah drag & drop.
+ * songIds = array id lagu dalam urutan baru (index 0 = position 1).
+ */
+export async function reorderPlaylistSongs(
+  db: Database,
+  playlistId: number,
+  songIds: number[]
+): Promise<void> {
+  for (let i = 0; i < songIds.length; i++) {
+    await db.execute(
+      `UPDATE playlist_songs SET position = $1
+       WHERE playlist_id = $2 AND song_id = $3`,
+      [i + 1, playlistId, songIds[i]]
+    );
+  }
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────

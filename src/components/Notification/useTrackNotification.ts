@@ -1,18 +1,10 @@
 /**
- * useTrackNotification.ts — OS Notification saat ganti lagu
+ * useTrackNotification.ts — v2
  *
- * WHY OS notification:
- *   Saat user sedang di app lain atau window ter-minimize,
- *   mereka tetap tahu lagu apa yang sedang diputar.
- *
- * IMPLEMENTASI:
- *   - Tauri v2: gunakan plugin tauri-plugin-notification
- *   - Fallback: Web Notification API (butuh permission)
- *
- * KONTEN NOTIFIKASI:
- *   Title: nama lagu
- *   Body: artis · album
- *   Icon: cover art (jika tersedia)
+ * FIX vs v1:
+ *   - notificationsEnabled sekarang membaca dari useSettingsStore
+ *     (sebelumnya hardcoded = true, tidak bisa dimatikan dari Settings)
+ *   - Hook otomatis berhenti kirim notifikasi kalau user matikan di Settings
  */
 
 import { useEffect, useRef } from "react";
@@ -61,11 +53,13 @@ export function useTrackNotification() {
   const { currentSong } = usePlayerStore();
   const prevSongId = useRef<number | null>(null);
 
-  // Baca setting notifikasi (default: true)
-  const notificationsEnabled = true; // bisa dihubungkan ke settingsStore
+  // [FIX] Baca dari store, bukan hardcoded true
+  const { notificationsEnabled } = useSettingsStore() as any;
 
   useEffect(() => {
     if (!currentSong) return;
+
+    // Jika notifikasi dimatikan user → tidak kirim sama sekali
     if (!notificationsEnabled) return;
 
     // Hanya kirim jika lagu benar-benar berganti (bukan re-render)
