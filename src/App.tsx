@@ -152,7 +152,23 @@ export default function App() {
   // Ini yang fix masalah: tema/warna/font tidak ter-apply sampai buka Settings
   // ═══════════════════════════════════════════════════════════════════════════
   useSettingsInit();
-
+// Resume AudioContext saat user interaction pertama (wajib untuk autoplay policy)
+useEffect(() => {
+  const resume = () => {
+    const ctx = (audioEngine as any).ctx as AudioContext | null;
+    if (ctx && ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
+  };
+  window.addEventListener("click", resume, { once: true });
+  window.addEventListener("keydown", resume, { once: true });
+  window.addEventListener("touchstart", resume, { once: true });
+  return () => {
+    window.removeEventListener("click", resume);
+    window.removeEventListener("keydown", resume);
+    window.removeEventListener("touchstart", resume);
+  };
+}, []);
   // ═══════════════════════════════════════════════════════════════════════════
   // [KEY #2] FOLDER WATCH — Auto-watch folder yang tersimpan di settings
   // ═══════════════════════════════════════════════════════════════════════════
@@ -290,6 +306,9 @@ export default function App() {
   const playStartTimeRef = useRef<number>(0);
   const playDurationRef = useRef<number>(0);
   const playCountedRef = useRef<boolean>(false);
+  // [FIX] Debounce error handling — cegah handleNext() dipanggil berkali-kali
+  const lastErrorTimeRef = useRef<number>(0);
+  const errorSkipCountRef = useRef<number>(0);
 
   useEffect(() => {
     audioEngine.onTimeUpdate(t => {
@@ -310,9 +329,28 @@ export default function App() {
     audioEngine.onEnded(() => handleNextRef.current());
     audioEngine.onPreloadStateChange(s => setPreloadState(s));
     audioEngine.onError((path, message) => {
+      // [FIX] Debounce: abaikan error yang terjadi dalam 3 detik dari error sebelumnya
+      const now = Date.now();
+      if (now - lastErrorTimeRef.current < 3000) {
+        console.warn("[App] onError diabaikan (debounce):", path);
+        return;
+      }
+      lastErrorTimeRef.current = now;
+
       const fileName = path.replace(/\\/g, "/").split("/").pop() ?? path;
-      toastError(`Failed to play: ${fileName}`);
-      setTimeout(() => { handleNextRef.current(); }, 1500);
+      toastError(`Gagal memutar: ${fileName}`);
+
+      // [FIX] Hanya auto-skip jika error berturut-turut tidak terlalu banyak
+      // (cegah infinite skip loop jika semua lagu gagal)
+      errorSkipCountRef.current += 1;
+      if (errorSkipCountRef.current > 5) {
+        console.error("[App] Terlalu banyak error berturut-turut, hentikan auto-skip");
+        errorSkipCountRef.current = 0;
+        return;
+      }
+
+      // Auto-skip ke lagu berikutnya setelah delay
+      setTimeout(() => { handleNextRef.current(); }, 2000);
     });
   }, []);
 

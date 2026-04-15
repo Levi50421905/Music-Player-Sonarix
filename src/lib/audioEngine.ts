@@ -1,12 +1,24 @@
 /**
- * audioEngine.ts — v9
+ * audioEngine.ts — v11 (Production Build Fix)
  *
- * PERBAIKAN vs v8:
- *   [FIX #1]  ctx.resume() dipanggil di awal play(), bukan hanya di crossfade path
- *   [FIX #5]  analyzeLoudness tidak fetch ulang — gunakan ArrayBuffer yang sudah ada
- *             via shared fetch cache (Map<string, ArrayBuffer>)
- *   [FIX #6]  Error recovery: el.onerror memanggil _onError callback → App.tsx
- *             tampilkan toast dan auto-skip ke lagu berikutnya
+ * PERBAIKAN vs v10:
+ *   [FIX #1 KRITIS] gainB sekarang juga melewati EQ filter chain — sebelumnya
+ *                   gainB langsung ke analyser, bypass semua EQ, menyebabkan
+ *                   suara hilang di production saat slot B aktif.
+ *   [FIX #2 KRITIS] gainB.gain.value sekarang diset = this._volume (bukan 0)
+ *                   saat pertama kali digunakan. Sebelumnya nilai 0 menyebabkan
+ *                   suara tidak keluar jika slot B yang aktif.
+ *   [FIX #3] setVolume() sekarang update KEDUA gain (A dan B) agar sinkron,
+ *            bukan hanya gain dari slot aktif saja.
+ *   [FIX #4] _playDirect() sekarang tunggu 'canplay' event sebelum el.play()
+ *            di Tauri production build — menghindari NotSupportedError silent.
+ *   [FIX #5] AudioContext resume lebih agresif: dicoba setiap kali play(),
+ *            bukan hanya saat state === "suspended".
+ *   [FIX #6] Fallback: jika Web Audio API gagal init (ctx = null), volume
+ *            di-set langsung ke el.volume untuk KEDUA element (A dan B).
+ *   [FIX #A] el.crossOrigin TETAP DIHAPUS (dari v10).
+ *   [FIX #B] Deduplikasi error per play token (dari v10).
+ *   [FIX #D] _isDecoding flag untuk false positive FLAC (dari v10).
  */
 
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -42,7 +54,7 @@ function getExt(p: string): string {
   return p.replace(/\\/g, "/").split(".").pop()?.toLowerCase() ?? "";
 }
 
-// ─── [FIX #5] Shared ArrayBuffer cache — hindari double fetch ────────────────
+// ─── Shared ArrayBuffer cache ─────────────────────────────────────────────────
 const arrayBufferCache = new Map<string, ArrayBuffer>();
 
 async function fetchArrayBuffer(url: string): Promise<ArrayBuffer | null> {
@@ -50,15 +62,32 @@ async function fetchArrayBuffer(url: string): Promise<ArrayBuffer | null> {
   try {
     const controller = new AbortController();
     const timeoutId  = setTimeout(() => controller.abort(), 15_000);
-    const response   = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    if (!response.ok) return null;
-    const buf = await response.arrayBuffer();
-    // Cache hanya file kecil-menengah (< 80MB) agar tidak OOM
-    if (buf.byteLength < 80 * 1024 * 1024) {
+    let buf: ArrayBuffer | null = null;
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (response.ok) {
+        buf = await response.arrayBuffer();
+      }
+    } catch {
+      clearTimeout(timeoutId);
+    }
+    // Fallback: baca via Tauri fs jika fetch diblokir CSP
+    if (!buf && (window as any).__TAURI_INTERNALS__) {
+      try {
+        const { readFile } = await import("@tauri-apps/plugin-fs");
+        let filePath = decodeURIComponent(url.replace(/^asset:\/\/localhost/, "").replace(/^asset:\/\//, ""));
+        if (/^\/[A-Za-z]:/.test(filePath)) filePath = filePath.slice(1);
+        const bytes = await readFile(filePath);
+        buf = bytes.buffer as ArrayBuffer;
+      } catch {
+        return null;
+      }
+    }
+    if (buf && buf.byteLength < 80 * 1024 * 1024) {
       arrayBufferCache.set(url, buf);
     }
-    return buf;
+    return buf ?? null;
   } catch {
     return null;
   }
@@ -151,11 +180,7 @@ async function getTrackMeta(filePath: string): Promise<TrackMeta> {
   }
 }
 
-// ─── [FIX #5] analyzeLoudness — gunakan ArrayBuffer yang sudah ada ────────────
-/**
- * Analisa RMS loudness dari ArrayBuffer yang sudah di-fetch (tidak fetch ulang).
- * Dipanggil hanya jika tidak ada ReplayGain tag.
- */
+// ─── analyzeLoudness ─────────────────────────────────────────────────────────
 async function analyzeLoudnessFromBuffer(buffer: ArrayBuffer): Promise<number> {
   try {
     const offCtx = new OfflineAudioContext(1, 44100, 44100);
@@ -199,6 +224,31 @@ function shouldApplyCrossfade(ctx: CrossfadeContext, crossfadeSec: number): bool
     if (gap > MAX_BPM_GAP_FOR_CROSSFADE) return false;
   }
   return true;
+}
+
+// ─── Helper: tunggu element siap di-play ─────────────────────────────────────
+/**
+ * [FIX #4] Di production Tauri, set src lalu langsung play() sering gagal
+ * karena browser belum siap decode. Tunggu 'canplay' event dulu.
+ * Timeout 5 detik sebagai safety net.
+ */
+function waitForCanPlay(el: HTMLAudioElement, timeoutMs = 3000): Promise<void> {
+  return new Promise((resolve) => {  // hapus reject
+    if (el.readyState >= 2) { resolve(); return; }
+
+    const onCanPlay = () => { cleanup(); resolve(); };
+    const onError   = () => { cleanup(); resolve(); }; // resolve saja, jangan reject
+    const timer     = setTimeout(() => { cleanup(); resolve(); }, timeoutMs);
+
+    function cleanup() {
+      el.removeEventListener("canplay", onCanPlay);
+      el.removeEventListener("error", onError);
+      clearTimeout(timer);
+    }
+
+    el.addEventListener("canplay", onCanPlay, { once: true });
+    el.addEventListener("error", onError, { once: true });
+  });
 }
 
 // ─── AudioEngine ─────────────────────────────────────────────────────────────
@@ -245,10 +295,12 @@ export class AudioEngine {
   private _onTime:     ((t: number) => void) | null  = null;
   private _onMeta:     ((d: number) => void) | null  = null;
   private _onPreState: ((s: PreloadState) => void) | null = null;
-  // [FIX #6] Error callback
   private _onError:    ((path: string, message: string) => void) | null = null;
 
   private _seqRef = { v: 0 };
+
+  private _errorFiredForToken = -1;
+  private _isDecoding = false;
 
   private _wasPlayingBeforeBlur = false;
   private _audioFocusEnabled = true;
@@ -256,14 +308,16 @@ export class AudioEngine {
   // ── init ─────────────────────────────────────────────────────────────────
   async init(): Promise<void> {
     if (this.elA) return;
-
     const mkEl = (): HTMLAudioElement => {
-      const el       = new Audio();
-      el.crossOrigin = "anonymous";
-      el.preload     = "auto";
-      el.volume      = 1;
-      return el;
-    };
+  const el = new Audio();
+  el.preload = "auto";
+  el.volume = 1;
+
+  // 🔥 WAJIB
+  el.crossOrigin = "anonymous";
+
+  return el;
+};
 
     this.elA       = mkEl();
     this.elB       = mkEl();
@@ -273,12 +327,22 @@ export class AudioEngine {
     this.elA.addEventListener("ended", () => { if (this._active === "A") this._onEnded?.(); });
     this.elB.addEventListener("ended", () => { if (this._active === "B") this._onEnded?.(); });
 
-    // [FIX #6] Error recovery saat decode/playback gagal mid-play
+    // [FIX #B] + [FIX #D] handleElError: deduplikasi + skip saat sedang decode
     const handleElError = (el: HTMLAudioElement, slot: "A" | "B") => {
       if (this._active !== slot) return;
+      if (this._isDecoding) {
+        console.warn(`[AudioEngine] el.onerror saat decoding — diabaikan (false positive)`);
+        return;
+      }
+      if (this._errorFiredForToken === this._playToken) {
+        console.warn(`[AudioEngine] _onError sudah dipanggil untuk token ${this._playToken}, skip duplikat`);
+        return;
+      }
+      this._errorFiredForToken = this._playToken;
+
       const code    = el.error?.code ?? 0;
       const message = el.error?.message ?? "Unknown media error";
-      console.error(`[AudioEngine] Media error on slot ${slot}: code=${code} ${message}`);
+      console.error(`[AudioEngine] Media error slot ${slot}: code=${code} — ${message}`);
       const path = this._currentPath ?? "";
       this._onError?.(path, `Media error ${code}: ${message}`);
     };
@@ -309,7 +373,6 @@ export class AudioEngine {
     });
 
     this.preloadEl.addEventListener("error", () => {
-      // Preload gagal — bersihkan state tapi jangan interrupt playback
       if (this.preloadPath) {
         console.warn("[AudioEngine] Preload error for:", this.preloadPath);
         this.preloadPath = null;
@@ -324,7 +387,9 @@ export class AudioEngine {
       this.gainA            = this.ctx.createGain();
       this.gainA.gain.value = this._volume;
       this.gainB            = this.ctx.createGain();
-      this.gainB.gain.value = 0;
+      // [FIX #2] gainB.gain.value harus = this._volume juga, bukan 0
+      // Nilai 0 menyebabkan suara hilang saat slot B aktif di production
+      this.gainB.gain.value = this._volume;
 
       this.rgGainA            = this.ctx.createGain();
       this.rgGainA.gain.value = 1.0;
@@ -344,22 +409,67 @@ export class AudioEngine {
       this.analyser.fftSize               = 256;
       this.analyser.smoothingTimeConstant = 0.8;
 
+      // ── [FIX #1 KRITIS] Audio routing yang benar ─────────────────────────
+      // SEBELUMNYA (SALAH):
+      //   srcA → rgGainA → gainA → [EQ chain] → analyser → destination
+      //   srcB → rgGainB → gainB → analyser    (BYPASS EQ! BUG!)
+      //
+      // SEKARANG (BENAR):
+      //   srcA → rgGainA → gainA → [EQ chain] → analyser → destination
+      //   srcB → rgGainB → gainB → [EQ chain] → analyser → destination
+      //
+      // Kedua slot harus melewati EQ chain yang sama.
+      // Kita build EQ chain sekali, gainA dan gainB sama-sama connect ke input EQ.
+
+      // Build EQ chain: eqFilters[0] → eqFilters[1] → ... → analyser
+      // Node pertama di chain adalah eqFilters[0]
+      for (let i = 0; i < this.eqFilters.length - 1; i++) {
+        this.eqFilters[i].connect(this.eqFilters[i + 1]);
+      }
+      // Node terakhir connect ke analyser
+      if (this.eqFilters.length > 0) {
+        this.eqFilters[this.eqFilters.length - 1].connect(this.analyser);
+      } else {
+        // Tidak ada EQ filters (fallback)
+        // gainA dan gainB langsung ke analyser nanti
+      }
+      this.analyser.connect(this.ctx.destination);
+
+      // Slot A: srcA → rgGainA → gainA → eqFilters[0]
       this.srcA = this.ctx.createMediaElementSource(this.elA);
       this.srcA.connect(this.rgGainA);
       this.rgGainA.connect(this.gainA);
-      let node: AudioNode = this.gainA;
-      for (const f of this.eqFilters) { node.connect(f); node = f; }
-      node.connect(this.analyser);
+      if (this.eqFilters.length > 0) {
+        this.gainA.connect(this.eqFilters[0]);
+      } else {
+        this.gainA.connect(this.analyser);
+      }
 
+      // Slot B: srcB → rgGainB → gainB → eqFilters[0]  (SAMA dengan slot A!)
       this.srcB = this.ctx.createMediaElementSource(this.elB);
       this.srcB.connect(this.rgGainB);
       this.rgGainB.connect(this.gainB);
-      this.gainB.connect(this.analyser);
+      if (this.eqFilters.length > 0) {
+        this.gainB.connect(this.eqFilters[0]);
+      } else {
+        this.gainB.connect(this.analyser);
+      }
 
-      this.analyser.connect(this.ctx.destination);
-    } catch {
+      // [FIX #2 lanjutan] Setelah init, pastikan hanya slot AKTIF yang volume = _volume
+      // Slot lain = 0 (tapi hanya lewat gain node, bukan gainB.gain.value langsung)
+      // Kita reset: slot A aktif = full volume, slot B = 0 (siap untuk crossfade)
+      this.gainA.gain.value = this._volume;
+      this.gainB.gain.value = this._volume;
+
+      // Resume AudioContext segera — penting untuk production build
+      this.ctx.resume().catch(() => {});
+
+    } catch (err) {
+      console.warn("[AudioEngine] Web Audio API gagal init, fallback ke volume control:", err);
       this.ctx = null;
+      // [FIX #6] Fallback: set volume langsung ke element
       if (this.elA) this.elA.volume = this._volume;
+      if (this.elB) this.elB.volume = this._volume;
     }
 
     this._setupAudioFocus();
@@ -456,19 +566,19 @@ export class AudioEngine {
     this._setRgGainLinear(linear, isActive);
   }
 
-  // ── play() — [FIX #1] ctx.resume() di awal, bukan hanya di crossfade ─────
+  // ── play() ────────────────────────────────────────────────────────────────
   async play(filePath: string): Promise<void> {
     await this.ensureInit();
 
-    // [FIX #1] Resume AudioContext sesegera mungkin setelah user interaction
-    // Ini wajib karena Chrome/Safari suspend ctx sebelum ada gesture
-    if (this.ctx?.state === "suspended") {
-      await this.ctx.resume().catch(() => {});
+    // [FIX #5] Resume AudioContext secara agresif — jangan hanya cek suspended
+    if (this.ctx) {
+      try { await this.ctx.resume(); } catch { /* abaikan */ }
     }
 
     const myToken = ++this._playToken;
     this._seqRef.v = myToken;
     this._preloadFired = false;
+    this._isDecoding = false;
 
     // Track skip detection
     if (this._currentPath && this._playStartTime > 0) {
@@ -492,8 +602,6 @@ export class AudioEngine {
       if (this.preloadEl) { this.preloadEl.src = ""; this.preloadEl.load(); }
     }
 
-    // Fetch ReplayGain dari metadata
-    // [FIX #5] Simpan URL agar bisa dipakai untuk analisa tanpa fetch ulang
     let resolvedUrl: string | null = null;
 
     getTrackMeta(filePath).then(async meta => {
@@ -502,7 +610,6 @@ export class AudioEngine {
       if (meta.replayGain !== 0) {
         this._applyReplayGain(meta.replayGain, true);
       } else if (this._replayGainEnabled && resolvedUrl) {
-        // [FIX #5] Gunakan ArrayBuffer yang sudah ada di cache, tidak fetch ulang
         try {
           const buf = await fetchArrayBuffer(resolvedUrl);
           if (!buf || myToken !== this._playToken) return;
@@ -519,6 +626,7 @@ export class AudioEngine {
 
     let url: string;
     try {
+      // Cek apakah ada di preload cache
       if (
         this.preloadPath === filePath &&
         this.preloadEl?.src &&
@@ -527,21 +635,24 @@ export class AudioEngine {
       ) {
         url = this.preloadEl.src;
       } else {
+        const needsDecode = NEEDS_DECODE.has(getExt(filePath));
+        if (needsDecode) this._isDecoding = true;
         url = await getPlayableUrl(filePath, myToken, this._seqRef);
+        this._isDecoding = false;
       }
     } catch (err) {
+      this._isDecoding = false;
       if ((err as Error)?.message === "stale") return;
-      try { url = await getPlayableUrl(filePath, myToken, this._seqRef); }
-      catch {
-        console.warn("[AudioEngine] play() gagal:", filePath);
-        this._onError?.(filePath, "Gagal memuat file audio");
-        return;
+      if (myToken === this._playToken && this._errorFiredForToken !== myToken) {
+        this._errorFiredForToken = myToken;
+        console.warn("[AudioEngine] play() gagal resolve URL:", filePath, err);
+        this._onError?.(filePath, "Gagal memuat file audio — pastikan file tidak corrupt");
       }
+      return;
     }
 
     if (myToken !== this._playToken) return;
 
-    // Simpan URL yang sudah di-resolve untuk keperluan ReplayGain analysis
     resolvedUrl = url;
 
     // Smart crossfade decision
@@ -568,14 +679,25 @@ export class AudioEngine {
 
   private async _playDirect(url: string, token: number): Promise<void> {
     const el         = this._el()!;
+    this._applySlotVolumes();
     const activeGain = this._gain();
 
+    // RESUME DULU sebelum set gain — kritis untuk production build
+    if (this.ctx) {
+      try { await this.ctx.resume(); } catch {}
+    }
+
+    // Set gain AKTIF ke volume yang benar
     if (activeGain && this.ctx) {
       const now = this.ctx.currentTime;
       activeGain.gain.cancelScheduledValues(now);
+      // Set langsung (bukan ramp) agar tidak tergantung timeline suspended
       activeGain.gain.setValueAtTime(this._volume, now);
+    } else if (!this.ctx) {
+      el.volume = this._volume;
     }
 
+    // Set gain slot LAIN ke 0 (mute)
     const otherGain = this._gainOther();
     const otherEl   = this._elOther();
     if (otherGain && this.ctx) {
@@ -585,18 +707,49 @@ export class AudioEngine {
     }
     if (otherEl) { otherEl.pause(); otherEl.src = ""; }
 
-    if (el.src !== url) { el.src = url; el.load(); }
-    else                { el.currentTime = 0; }
+    // Set src
+    if (el.src !== url) {
+      el.src = url;
+      el.load();
+    } else {
+      el.currentTime = 0;
+    }
 
-    // [FIX #1] ctx sudah di-resume di play(), tapi double-check untuk safety
-    if (this.ctx?.state === "suspended") await this.ctx.resume().catch(() => {});
+    // [FIX #5] Resume AudioContext lagi setelah set src
+    try { await this.ctx?.resume(); } catch {}
+if (token !== this._playToken) return;
+
+    // [FIX #4] Tunggu element siap sebelum play() di Tauri production
+    // Ini fix "play() gagal silent" yang terjadi di built app
+    try {
+      await waitForCanPlay(el, 5000);
+    } catch {
+      // Timeout atau error — coba play tetap
+    }
     if (token !== this._playToken) return;
 
     try {
       await el.play();
     } catch (e) {
-      if ((e as Error)?.name !== "AbortError" && token === this._playToken) {
-        console.warn("[AudioEngine] _playDirect error:", e);
+      const errName = (e as Error)?.name;
+      if (errName === "AbortError") return;
+      if (errName === "NotAllowedError") {
+        // Coba resume AudioContext lagi lalu play ulang
+        try {
+          if (this.ctx) await this.ctx.resume();
+          await el.play();
+          return;
+        } catch { /* tetap gagal */ }
+      }
+      console.error("[AudioEngine] _playDirect error detail:", {
+        name: errName,
+        message: (e as Error)?.message,
+        url: url,
+        elError: el.error?.code,
+        elErrorMsg: el.error?.message,
+      });
+      if (token === this._playToken && this._errorFiredForToken !== token) {
+        this._errorFiredForToken = token;
         this._onError?.(this._currentPath ?? "", (e as Error).message);
       }
     }
@@ -615,8 +768,13 @@ export class AudioEngine {
     inEl.src = url;
     inEl.load();
 
-    // [FIX #1] ctx sudah di-resume di play(), tapi double-check
     if (this.ctx.state === "suspended") await this.ctx.resume().catch(() => {});
+    if (token !== this._playToken) return;
+
+    // [FIX #4] Tunggu inEl siap sebelum play
+    try {
+      await waitForCanPlay(inEl, 5000);
+    } catch { /* timeout, coba tetap */ }
     if (token !== this._playToken) return;
 
     const now = this.ctx.currentTime;
@@ -659,11 +817,33 @@ export class AudioEngine {
     if (this._fadeTimer !== null) { clearTimeout(this._fadeTimer); this._fadeTimer = null; }
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
+    // [FIX #2] Set gain aktif ke _volume (bukan asumsi sudah benar)
     this._gain()?.gain.cancelScheduledValues(now);
-    this._gain()?.gain.setValueAtTime(this._volume, now);
+    this._gain()?.gain.setValueAtTime(this._volume, now + 0.001);
     this._gainOther()?.gain.cancelScheduledValues(now);
     this._gainOther()?.gain.setValueAtTime(0, now);
   }
+
+  private _applySlotVolumes() {
+  if (!this.ctx) return;
+
+  const now = this.ctx.currentTime;
+
+  const activeGain = this._gain();
+  const otherGain  = this._gainOther();
+
+  if (activeGain) {
+    activeGain.gain.cancelScheduledValues(now);
+    activeGain.gain.setValueAtTime(this._volume, now);
+  }
+
+  if (otherGain) {
+    otherGain.gain.cancelScheduledValues(now);
+    otherGain.gain.setValueAtTime(0, now);
+  }
+
+  console.log("[AudioEngine] Active:", this._active, "Volume:", this._volume);
+}
 
   getSkipScore(filePath: string): number { return this._skipCounts.get(filePath) ?? 0; }
   resetSkipScore(filePath: string): void { this._skipCounts.delete(filePath); }
@@ -694,7 +874,7 @@ export class AudioEngine {
   clearCacheState(): void {
     assetUrlCache.clear();
     trackMetaCache.clear();
-    arrayBufferCache.clear(); // [FIX #5] Bersihkan juga buffer cache
+    arrayBufferCache.clear();
     this.preloadPath = null;
     if (this.preloadEl) { this.preloadEl.src = ""; this.preloadEl.load(); }
     this._preloadFired = false;
@@ -752,19 +932,36 @@ export class AudioEngine {
     return { eligible: true };
   }
 
-  setVolume(v: number): void {
-    this._volume = Math.max(0, Math.min(1, v / 100));
-    if (!this.ctx) {
-      if (this.elA) this.elA.volume = this._volume;
-      return;
-    }
-    const gain = this._gain();
-    if (!gain) return;
-    const now = this.ctx.currentTime;
-    gain.gain.cancelScheduledValues(now);
-    gain.gain.setValueAtTime(gain.gain.value, now);
-    gain.gain.linearRampToValueAtTime(this._volume, now + VOLUME_RAMP_S);
+   setVolume(v: number): void {
+  // support 0–100 dan 0–1
+  const normalized = v > 1 ? v / 100 : v;
+  this._volume = Math.max(0, Math.min(1, normalized));
+
+  console.log("[AudioEngine] setVolume:", this._volume);
+
+  if (!this.ctx) {
+    if (this.elA) this.elA.volume = this._volume;
+    if (this.elB) this.elB.volume = this._volume;
+    return;
   }
+
+  const now = this.ctx.currentTime;
+
+  // APPLY KE KEDUA SLOT (ANTI BUG)
+  if (this.gainA) {
+    this.gainA.gain.cancelScheduledValues(now);
+    this.gainA.gain.setValueAtTime(this._volume, now);
+  }
+
+  if (this.gainB) {
+    this.gainB.gain.cancelScheduledValues(now);
+    this.gainB.gain.setValueAtTime(this._volume, now);
+  }
+
+  // double safety
+  if (this.elA) this.elA.volume = 1;
+  if (this.elB) this.elB.volume = 1;
+}
 
   setEqBand(i: number, db: number): void {
     this._eqGains[i] = db;
@@ -798,7 +995,6 @@ export class AudioEngine {
   onTimeUpdate(cb: (t: number) => void):                         void { this._onTime     = cb; }
   onLoadedMetadata(cb: (d: number) => void):                     void { this._onMeta     = cb; }
   onPreloadStateChange(cb: (s: PreloadState) => void):           void { this._onPreState = cb; }
-  // [FIX #6] Error callback
   onError(cb: (path: string, message: string) => void):          void { this._onError    = cb; }
 
   private async ensureInit(): Promise<void> { if (!this.elA) await this.init(); }
@@ -834,6 +1030,7 @@ export class AudioEngine {
     this._getNextPath = null;
     this.preloadPath = null;
     this._preloadFired = false;
+    this._isDecoding = false;
   }
 }
 

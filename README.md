@@ -23,7 +23,7 @@
 
 | Installer | Type | Recommended |
 |-----------|------|-------------|
-| [Sonarix-setup.exe](https://github.com/Levi50421905/Music-Player-Sonarix/releases/download/v1.0.0/Sonarix-setup.exe) | NSIS Installer | ✅ Most users |
+| [Sonarix_1.0.0_x64-setup.exe](https://github.com/Levi50421905/Music-Player-Sonarix/releases/download/v1.0.0/Sonarix_1.0.0_x64-setup.exe) | NSIS Installer | ✅ Most users |
 | [Sonarix_1.0.0_x64_en-US.msi](https://github.com/Levi50421905/Music-Player-Sonarix/releases/download/v1.0.0/Sonarix_1.0.0_x64_en-US.msi) | MSI Package | For enterprise / IT deployment |
 
 > **Windows only** — macOS and Linux builds are planned for a future release.

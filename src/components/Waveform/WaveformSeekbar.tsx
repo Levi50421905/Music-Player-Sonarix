@@ -62,20 +62,46 @@ export default function WaveformSeekbar({
 
     (async () => {
       try {
-        const url = audioEngine.getAssetUrl(filePath);
-        const controller = new AbortController();
-        const timeoutId  = setTimeout(() => controller.abort(), 10000);
-        let decoded = false;
+          const url = audioEngine.getAssetUrl(filePath);
+          let decoded = false;
+          let audioBuffer: AudioBuffer | null = null;
 
-        try {
-          const response = await fetch(url, { signal: controller.signal });
-          clearTimeout(timeoutId);
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const buffer = await response.arrayBuffer();
+          // Coba fetch langsung (bisa di dev, atau di production dengan CSP yang benar)
           try {
-            const offlineCtx = new OfflineAudioContext(1, 44100, 44100);
-            const audioBuffer = await offlineCtx.decodeAudioData(buffer.slice(0));
-            if (cancelled) return;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            if (response.ok) {
+              const buffer = await response.arrayBuffer();
+              if (!cancelled) {
+                try {
+                  const offlineCtx = new OfflineAudioContext(1, 44100, 44100);
+                  audioBuffer = await offlineCtx.decodeAudioData(buffer.slice(0));
+                  decoded = true;
+                } catch { /* decode gagal */ }
+              }
+            }
+          } catch { /* fetch gagal, coba fallback */ }
+
+          // Fallback: baca via Tauri readFile jika fetch diblokir
+          if (!decoded && !cancelled && (window as any).__TAURI_INTERNALS__) {
+            try {
+              const { readFile } = await import("@tauri-apps/plugin-fs");
+              let filePath2 = decodeURIComponent(url.replace(/^asset:\/\/localhost/, "").replace(/^asset:\/\//, ""));
+              if (/^\/[A-Za-z]:/.test(filePath2)) filePath2 = filePath2.slice(1);
+              const bytes = await readFile(filePath2);
+              if (!cancelled) {
+                try {
+                  const offlineCtx = new OfflineAudioContext(1, 44100, 44100);
+                  audioBuffer = await offlineCtx.decodeAudioData(bytes.buffer.slice(0));
+                  decoded = true;
+                } catch { /* decode gagal */ }
+              }
+            } catch { /* readFile gagal */ }
+          }
+
+          if (decoded && audioBuffer && !cancelled) {
             const channelData = audioBuffer.getChannelData(0);
             const segSize = Math.floor(channelData.length / barCount);
             const bars = new Float32Array(barCount);
@@ -89,21 +115,13 @@ export default function WaveformSeekbar({
             for (let i = 0; i < bars.length; i++) bars[i] /= max;
             waveformCache.set(filePath, bars);
             if (!cancelled) setWaveform(bars);
-            decoded = true;
-          } catch {}
-        } catch { clearTimeout(timeoutId); }
+          }
 
-        if (!decoded && !cancelled) {
-          const fake = generateFallbackWaveform(barCount);
-          waveformCache.set(filePath, fake);
-          setWaveform(fake);
-        }
-      } catch {
-        if (!cancelled) {
-          const fake = generateFallbackWaveform(barCount);
-          waveformCache.set(filePath, fake);
-          setWaveform(fake);
-        }
+          if (!decoded && !cancelled) {
+            const fake = generateFallbackWaveform(barCount);
+            waveformCache.set(filePath, fake);
+            setWaveform(fake);
+          }
       } finally {
         if (!cancelled) setLoading(false);
       }
