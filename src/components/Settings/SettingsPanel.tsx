@@ -1559,33 +1559,77 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
 
             {/* ──────────────── ABOUT ──────────────── */}
             {section === "about" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 16, alignItems: "center", paddingTop: 16 }}>
-                <div style={{
-                  width: 60, height: 60, borderRadius: 16,
-                  background: "linear-gradient(135deg, var(--accent), #EC4899)",
-                  display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26,
-                }}>♪</div>
-                <div style={{ textAlign: "center" }}>
-                  <h2 style={{ fontWeight: 700, fontSize: 20, letterSpacing: "-0.5px", color: "var(--text-primary)" }}>Sonarix</h2>
-                  <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>Version 1.0.0</p>
-                  <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    {lang === "id" ? "Dibuat dengan Tauri v2 + React" : "Built with Tauri v2 + React"}
-                  </p>
-                </div>
-                <SettingCard style={{ width: "100%", maxWidth: 420 }}>
-                  <p style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.8, textAlign: "center" }}>
-                    Smart shuffle · ReplayGain · Dynamic preload · Gapless · Smart crossfade ·
-                    Fade in on resume · 10-band EQ · LRC sync · Auto fetch lyrics · Folder watch · OS Notifications
-                  </p>
-                </SettingCard>
-                <SmallBtn onClick={() => invoke("open_file_manager", { path: "." })}>
-                  {lang === "id" ? "Buka Folder App" : "Open App Folder"}
-                </SmallBtn>
-              </div>
+              <AboutSection lang={lang} />
             )}
 
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+// ── About section — terpisah agar bisa pakai hooks ────────────────────────────
+function AboutSection({ lang }: { lang: Lang }) {
+  const [dbPath, setDbPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    import("../../lib/db").then(({ getDbPath }) => {
+      getDbPath().then(p => setDbPath(p)).catch(() => {});
+    });
+  }, []);
+
+  // Buka folder yang berisi file DB
+  const openDbFolder = async () => {
+    if (!dbPath) return;
+    // Strip "sqlite:" prefix, ambil folder parent
+    const filePath = dbPath.replace(/^sqlite:/, "");
+    const folderPath = filePath.replace(/\/[^/]+$/, "");
+    await invoke("open_file_manager", { path: folderPath });
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, alignItems: "center", paddingTop: 16 }}>
+      <div style={{
+        width: 60, height: 60, borderRadius: 16,
+        background: "linear-gradient(135deg, var(--accent), #EC4899)",
+        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26,
+      }}>♪</div>
+      <div style={{ textAlign: "center" }}>
+        <h2 style={{ fontWeight: 700, fontSize: 20, letterSpacing: "-0.5px", color: "var(--text-primary)" }}>Sonarix</h2>
+        <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>Version 1.0.0</p>
+        <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
+          {lang === "id" ? "Dibuat dengan Tauri v2 + React" : "Built with Tauri v2 + React"}
+        </p>
+      </div>
+      <SettingCard style={{ width: "100%", maxWidth: 420 }}>
+        <p style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.8, textAlign: "center" }}>
+          Smart shuffle · ReplayGain · Dynamic preload · Gapless · Smart crossfade ·
+          Fade in on resume · 10-band EQ · LRC sync · Auto fetch lyrics · Folder watch · OS Notifications
+        </p>
+      </SettingCard>
+
+      {/* Database path info */}
+      <SettingCard style={{ width: "100%", maxWidth: 420 }}>
+        <p style={{ fontSize: 10, fontWeight: 700, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>
+          {lang === "id" ? "Lokasi Database" : "Database Location"}
+        </p>
+        <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'Space Mono', monospace", wordBreak: "break-all", lineHeight: 1.6, background: "var(--bg-muted)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-sm)", padding: "6px 8px" }}>
+          {dbPath ?? (lang === "id" ? "Memuat…" : "Loading…")}
+        </p>
+        <p style={{ fontSize: 10, color: "var(--text-faint)", marginTop: 6, lineHeight: 1.5 }}>
+          {lang === "id"
+            ? "File ini menyimpan seluruh library. Jangan hapus kecuali ingin reset."
+            : "This file stores your entire library. Do not delete unless you want to reset."}
+        </p>
+      </SettingCard>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <SmallBtn onClick={openDbFolder}>
+          {lang === "id" ? "📂 Buka Folder Data" : "📂 Open Data Folder"}
+        </SmallBtn>
+        <SmallBtn onClick={() => invoke("open_file_manager", { path: "." })}>
+          {lang === "id" ? "Buka Folder App" : "Open App Folder"}
+        </SmallBtn>
       </div>
     </div>
   );

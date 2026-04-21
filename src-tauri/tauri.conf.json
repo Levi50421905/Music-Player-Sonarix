@@ -72,8 +72,6 @@
   }
 },
   "plugins": {
-    "sql": {
-      "preload": ["sqlite:sonarix.db"]
-    }
+    "sql": {}
   }
 }

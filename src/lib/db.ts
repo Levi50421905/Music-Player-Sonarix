@@ -8,14 +8,48 @@
  */
 
 import Database from "@tauri-apps/plugin-sql";
+import { appLocalDataDir } from "@tauri-apps/api/path";
+import { mkdir } from "@tauri-apps/plugin-fs";
 
 let _db: Database | null = null;
+let _dbPath: string | null = null;
+
+/**
+ * Resolve absolute path untuk database agar persisten di semua platform.
+ * Tauri menyimpan appLocalDataDir di:
+ *   Windows : %LOCALAPPDATA%\com.sonarix.app\
+ *   macOS   : ~/Library/Application Support/com.sonarix.app/
+ *   Linux   : ~/.local/share/com.sonarix.app/
+ *
+ * Path relatif "sqlite:sonarix.db" TIDAK reliable karena working directory
+ * bisa berubah tergantung cara app dijalankan, sehingga data bisa hilang.
+ */
+async function resolveDbPath(): Promise<string> {
+  if (_dbPath) return _dbPath;
+  const dataDir = await appLocalDataDir();
+  // Pastikan direktori ada
+  try {
+    await mkdir(dataDir, { recursive: true });
+  } catch {
+    // Sudah ada, abaikan
+  }
+  // Normalize separator — Tauri SQL plugin menerima path absolut dengan prefix sqlite:
+  const normalized = dataDir.replace(/\\/g, "/").replace(/\/$/, "");
+  _dbPath = `sqlite:${normalized}/sonarix.db`;
+  return _dbPath;
+}
 
 export async function getDb(): Promise<Database> {
   if (_db) return _db;
-  _db = await Database.load("sqlite:sonarix.db");
+  const path = await resolveDbPath();
+  _db = await Database.load(path);
   await migrate(_db);
   return _db;
+}
+
+/** Kembalikan path database aktual (untuk debugging) */
+export async function getDbPath(): Promise<string> {
+  return resolveDbPath();
 }
 
 async function migrate(db: Database) {
